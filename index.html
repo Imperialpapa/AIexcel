@@ -206,6 +206,7 @@
     <div class="toolbar-section">
         <input type="password" id="api-key" placeholder="API Key" style="width: 150px;" />
         <input type="text" id="ai-prompt" placeholder="AI 명령어..." style="width: 250px;" />
+        <input type="number" id="ai-sample-rows" placeholder="샘플 행 수" value="50" min="10" max="1000" style="width: 90px;" title="AI에 전송할 최대 행 수 (토큰 절약)" />
         <button class="toolbar-btn" id="ai-btn" onclick="app.aiEngine.processCommand()">✨ AI 실행</button>
         <button class="toolbar-btn" onclick="app.toggleAIPanel()">AI 패널</button>
         <span id="loading">처리중... 🤖</span>
@@ -1934,15 +1935,32 @@ class AIEngine {
         this.grid = gridManager;
         this.input = document.getElementById('ai-prompt');
         this.apiKeyInput = document.getElementById('api-key');
+        this.sampleRowsInput = document.getElementById('ai-sample-rows');
         this.loading = document.getElementById('loading');
         this.historyContainer = document.getElementById('ai-history');
         this.history = [];
+    }
+
+    // 토큰 절약을 위한 데이터 정리
+    cleanDataForAI(data) {
+        return data.map(row => {
+            const cleanRow = {};
+            Object.keys(row).forEach(key => {
+                const value = row[key];
+                // null, undefined, 빈 문자열 제거
+                if (value !== null && value !== undefined && value !== '') {
+                    cleanRow[key] = value;
+                }
+            });
+            return cleanRow;
+        });
     }
 
     async processCommand() {
         const apiKey = this.apiKeyInput.value.trim();
         const prompt = this.input.value.trim();
         const currentData = this.grid.getCurrentData();
+        const maxRows = parseInt(this.sampleRowsInput.value) || 50;
 
         if (!apiKey) {
             alert("OpenAI API Key를 먼저 입력해주세요.");
@@ -1961,29 +1979,32 @@ class AIEngine {
         const startTime = Date.now();
 
         try {
-            // 데이터 샘플링: 1000행 이상이면 처음 500행 + 마지막 500행만 전송
+            // 데이터 샘플링: 사용자 설정 행 수만큼만 전송 (토큰 절약)
             let sampledData = currentData;
             let isSampled = false;
-            const MAX_ROWS = 1000;
 
-            if (currentData.length > MAX_ROWS) {
-                const halfSize = Math.floor(MAX_ROWS / 2);
-                sampledData = [
-                    ...currentData.slice(0, halfSize),
-                    ...currentData.slice(-halfSize)
-                ];
+            if (currentData.length > maxRows) {
+                // 앞부분만 샘플링 (간단하고 효율적)
+                sampledData = currentData.slice(0, maxRows);
                 isSampled = true;
             }
 
-            // AI에게 보낼 메시지 구성
+            // 데이터 정리: 빈 값 제거로 토큰 절약
+            const cleanedData = this.cleanDataForAI(sampledData);
+
+            // 토큰 사용량 추정 (대략적)
+            const estimatedTokens = Math.ceil(JSON.stringify(cleanedData).length / 4);
+            console.log(`예상 토큰: ~${estimatedTokens} (${cleanedData.length}행, 원본 ${currentData.length}행)`);
+
+            // AI에게 보낼 메시지 구성 (짧은 프롬프트로 최적화)
             const messages = [
                 {
                     role: "system",
-                    content: "You are a helpful data assistant. Output ONLY valid JSON array representing the modified data based on the user's command. Do not explain. Maintain the same keys/structure unless asked to change."
+                    content: "Output ONLY valid JSON array. No explanations."
                 },
                 {
                     role: "user",
-                    content: `Here is the current dataset in JSON${isSampled ? ' (sampled from ' + currentData.length + ' rows)' : ''}:\n${JSON.stringify(sampledData)}\n\nCommand: ${prompt}\n\nProcessed Data (JSON):`
+                    content: `Data${isSampled ? ' (first ' + maxRows + ' of ' + currentData.length + ')' : ''}:\n${JSON.stringify(cleanedData)}\n\nTask: ${prompt}\n\nJSON:`
                 }
             ];
 
@@ -1996,7 +2017,8 @@ class AIEngine {
                 body: JSON.stringify({
                     model: "gpt-3.5-turbo",
                     messages: messages,
-                    temperature: 0.1
+                    temperature: 0.1,
+                    max_tokens: 4000
                 })
             });
 
@@ -2008,6 +2030,13 @@ class AIEngine {
 
             const content = result.choices[0].message.content;
 
+            // 실제 토큰 사용량 (API 응답에서)
+            const tokensUsed = result.usage ? result.usage.total_tokens : 0;
+            const promptTokens = result.usage ? result.usage.prompt_tokens : 0;
+            const completionTokens = result.usage ? result.usage.completion_tokens : 0;
+
+            console.log(`실제 토큰: ${tokensUsed} (입력: ${promptTokens}, 출력: ${completionTokens})`);
+
             // JSON 파싱 시도
             try {
                 const newData = JSON.parse(content);
@@ -2015,7 +2044,7 @@ class AIEngine {
                     this.grid.updateCurrentSheetData(newData);
 
                     const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1);
-                    const resultSummary = `${currentData.length}행 → ${newData.length}행 (${elapsedTime}초)`;
+                    const resultSummary = `${currentData.length}행 → ${newData.length}행 (${elapsedTime}초, ${tokensUsed} 토큰)`;
 
                     this.addHistory(prompt, resultSummary, false);
                     this.input.value = ''; // 명령어 입력창 초기화
