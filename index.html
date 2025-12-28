@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Smart Spreadsheet (Multi-sheet & GPT)</title>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+        /* Header & Toolbar */
+        header { padding: 12px; background: #f3f3f3; border-bottom: 1px solid #ccc; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+        .toolbar-group { display: flex; gap: 8px; align-items: center; }
+
+        /* Main Content Area (Grid + Side Panel) */
+        #main-content { display: flex; flex: 1; overflow: hidden; }
+
+        /* Grid Area */
+        #grid-container { flex: 1; overflow: auto; position: relative; background: #fff; }
+        table { border-collapse: collapse; min-width: 100%; font-size: 14px; }
+        th, td { border: 1px solid #e0e0e0; min-width: 80px; padding: 6px; text-align: center; outline: none; }
+        th { background: #f9f9f9; position: sticky; top: 0; z-index: 10; font-weight: 600; color: #555; border-bottom: 2px solid #ccc; }
+        td:focus { border: 2px solid #107c41; background: #e8f5e9; }
+
+        /* Sheet Tabs (Bottom) */
+        #sheet-tabs { background: #e0e0e0; padding: 0; display: flex; overflow-x: auto; border-top: 1px solid #ccc; }
+        .sheet-tab { padding: 8px 15px; cursor: pointer; background: #e0e0e0; border-right: 1px solid #ccc; font-size: 13px; user-select: none; }
+        .sheet-tab.active { background: #fff; color: #107c41; font-weight: bold; border-bottom: 3px solid #107c41; }
+        .sheet-tab:hover:not(.active) { background: #d0d0d0; }
+        .sheet-tab.empty { color: #999; font-style: italic; }
+
+        /* AI Side Panel */
+        #ai-panel { width: 320px; border-left: 2px solid #ccc; background: #f9f9f9; display: flex; flex-direction: column; overflow: hidden; }
+        #ai-panel.collapsed { width: 0; border: none; }
+        #ai-panel-header { padding: 12px; background: #107c41; color: white; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+        #ai-panel-toggle { background: transparent; border: none; color: white; cursor: pointer; font-size: 18px; padding: 4px; }
+        #ai-history { flex: 1; overflow-y: auto; padding: 10px; }
+        .ai-entry { background: white; margin-bottom: 10px; padding: 10px; border-radius: 6px; border-left: 4px solid #107c41; font-size: 13px; }
+        .ai-entry-time { color: #666; font-size: 11px; margin-bottom: 4px; }
+        .ai-entry-command { font-weight: bold; color: #107c41; margin-bottom: 6px; }
+        .ai-entry-result { color: #333; }
+        .ai-entry-error { border-left-color: #d32f2f; }
+        .ai-entry-error .ai-entry-command { color: #d32f2f; }
+
+        /* AI & UI Components */
+        .btn { padding: 8px 14px; cursor: pointer; background: #107c41; color: white; border: none; border-radius: 4px; font-weight: 500; transition: 0.2s; }
+        .btn:hover { background: #0c5e31; }
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-toggle { background: #666; padding: 6px 10px; font-size: 12px; }
+
+        input[type="text"], input[type="password"] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        #ai-prompt { width: 300px; }
+        #api-key { width: 200px; }
+
+        /* Loading Indicator */
+        #loading { display: none; color: #107c41; font-weight: bold; margin-left: 10px; }
+
+        /* Performance Stats */
+        #stats { font-size: 11px; color: #666; padding: 4px 12px; background: #fff; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="toolbar-group">
+        <input type="file" id="fileInput" hidden />
+        <button class="btn" onclick="app.excelIO.triggerImport()">📂 열기</button>
+        <button class="btn" onclick="app.excelIO.exportFile()">💾 저장</button>
+        <span id="stats"></span>
+    </div>
+
+    <div class="toolbar-group">
+        <input type="password" id="api-key" placeholder="OpenAI API Key 입력" />
+        <input type="text" id="ai-prompt" placeholder="예: 가격이 높은 순으로 정렬해줘" />
+        <button class="btn" id="ai-btn" onclick="app.aiEngine.processCommand()">✨ AI 실행</button>
+        <button class="btn btn-toggle" onclick="app.toggleAIPanel()">AI 패널</button>
+        <span id="loading">처리중... 🤖</span>
+    </div>
+</header>
+
+<div id="main-content">
+    <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <div id="grid-container">
+            <table id="spreadsheet">
+                <thead><tr id="header-row"></tr></thead>
+                <tbody id="table-body"></tbody>
+            </table>
+        </div>
+        <div id="sheet-tabs"></div>
+    </div>
+
+    <div id="ai-panel">
+        <div id="ai-panel-header">
+            <span>AI 작업 히스토리</span>
+            <button id="ai-panel-toggle" onclick="app.toggleAIPanel()">✕</button>
+        </div>
+        <div id="ai-history"></div>
+    </div>
+</div>
+
+<script>
+/**
+ * 1. GridManager: 멀티 시트 관리 및 렌더링 (최적화 버전)
+ */
+class GridManager {
+    constructor(tableId, tabsId) {
+        this.tableBody = document.querySelector(tableId + ' tbody');
+        this.headerRow = document.querySelector(tableId + ' thead tr');
+        this.tabsContainer = document.querySelector(tabsId);
+        this.statsElement = document.getElementById('stats');
+
+        this.sheets = {}; // { "Sheet1": [data], "Sheet2": [data] }
+        this.currentSheetName = null;
+        this.currentKeys = [];
+
+        // 이벤트 위임 설정 (성능 최적화)
+        this.setupEventDelegation();
+    }
+
+    // 이벤트 위임으로 메모리 사용량 대폭 감소
+    setupEventDelegation() {
+        this.tableBody.addEventListener('blur', (e) => {
+            if (e.target.tagName === 'TD' && e.target.contentEditable === 'true') {
+                const rowIndex = e.target.parentElement.rowIndex - 1; // 헤더 제외
+                const cellIndex = e.target.cellIndex;
+                const key = this.currentKeys[cellIndex];
+
+                if (key && this.sheets[this.currentSheetName] && this.sheets[this.currentSheetName][rowIndex]) {
+                    const value = e.target.textContent.trim();
+                    this.sheets[this.currentSheetName][rowIndex][key] = isNaN(value) ? value : Number(value);
+                }
+            }
+        }, true); // capture phase
+    }
+
+    // 여러 시트 데이터 로드
+    loadSheets(sheetDataMap) {
+        this.sheets = sheetDataMap;
+        const sheetNames = Object.keys(this.sheets);
+        if (sheetNames.length > 0) {
+            this.switchSheet(sheetNames[0]);
+        }
+        this.renderTabs();
+    }
+
+    // 시트 변경
+    switchSheet(sheetName) {
+        this.currentSheetName = sheetName;
+        this.renderGrid(this.sheets[sheetName]);
+        this.renderTabs(); // 탭 활성 상태 업데이트
+    }
+
+    // 현재 시트 데이터 업데이트 (AI 결과 반영 등)
+    updateCurrentSheetData(newData) {
+        if (!this.currentSheetName) return;
+        this.sheets[this.currentSheetName] = newData;
+        this.renderGrid(newData);
+    }
+
+    getCurrentData() {
+        return this.currentSheetName ? this.sheets[this.currentSheetName] : [];
+    }
+
+    // 화면 그리기 (테이블) - 증분 렌더링으로 최적화
+    renderGrid(data) {
+        const startTime = performance.now();
+
+        this.tableBody.innerHTML = '';
+        this.headerRow.innerHTML = '';
+
+        if (!data || data.length === 0) {
+            this.tableBody.innerHTML = '<tr><td colspan="5">데이터가 없습니다.</td></tr>';
+            this.updateStats(0, 0, 0);
+            return;
+        }
+
+        // 헤더 (Keys)
+        this.currentKeys = Object.keys(data[0]);
+        this.currentKeys.forEach(key => {
+            let th = document.createElement('th');
+            th.textContent = key;
+            this.headerRow.appendChild(th);
+        });
+
+        // 증분 렌더링: 대용량 데이터를 부드럽게 처리
+        const BATCH_SIZE = 100; // 한 번에 렌더링할 행 수
+        let currentIndex = 0;
+
+        const renderBatch = () => {
+            const fragment = document.createDocumentFragment();
+            const endIndex = Math.min(currentIndex + BATCH_SIZE, data.length);
+
+            for (let rowIndex = currentIndex; rowIndex < endIndex; rowIndex++) {
+                const row = data[rowIndex];
+                let tr = document.createElement('tr');
+
+                this.currentKeys.forEach(key => {
+                    let td = document.createElement('td');
+                    td.contentEditable = true;
+                    td.textContent = row[key] !== undefined ? row[key] : "";
+                    tr.appendChild(td);
+                });
+
+                fragment.appendChild(tr);
+            }
+
+            this.tableBody.appendChild(fragment);
+            currentIndex = endIndex;
+
+            if (currentIndex < data.length) {
+                requestAnimationFrame(renderBatch); // 다음 배치를 비동기로 처리
+            } else {
+                const endTime = performance.now();
+                this.updateStats(data.length, this.currentKeys.length, endTime - startTime);
+            }
+        };
+
+        renderBatch();
+    }
+
+    // 성능 통계 표시
+    updateStats(rows, cols, renderTime) {
+        if (this.statsElement) {
+            this.statsElement.textContent = `${rows.toLocaleString()}행 × ${cols}열 (렌더링: ${renderTime.toFixed(0)}ms)`;
+        }
+    }
+
+    // 하단 탭 그리기 (빈 시트도 표시)
+    renderTabs() {
+        this.tabsContainer.innerHTML = '';
+        Object.keys(this.sheets).forEach(name => {
+            const data = this.sheets[name];
+            const isEmpty = !data || data.length === 0;
+
+            let tab = document.createElement('div');
+            tab.className = `sheet-tab ${name === this.currentSheetName ? 'active' : ''} ${isEmpty ? 'empty' : ''}`;
+            tab.textContent = isEmpty ? `${name} (비어있음)` : name;
+            tab.onclick = () => this.switchSheet(name);
+            this.tabsContainer.appendChild(tab);
+        });
+    }
+}
+
+/**
+ * 2. ExcelIO: 멀티 시트 파일 입출력 (빈 시트 처리 개선)
+ */
+class ExcelIO {
+    constructor(gridManager) {
+        this.grid = gridManager;
+        this.fileInput = document.getElementById('fileInput');
+        this.fileInput.addEventListener('change', (e) => this.handleFile(e));
+    }
+
+    triggerImport() { this.fileInput.click(); }
+
+    handleFile(e) {
+        const file = e.target.files[0];
+        if(!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const data = new Uint8Array(event.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+
+            // 모든 시트 데이터를 객체로 변환 (빈 시트도 포함)
+            const allSheetsData = {};
+            workbook.SheetNames.forEach(sheetName => {
+                const sheet = workbook.Sheets[sheetName];
+                const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+                // 빈 시트도 추가 (이전에는 길이가 0이면 제외했음)
+                allSheetsData[sheetName] = jsonData;
+            });
+
+            this.grid.loadSheets(allSheetsData);
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    exportFile() {
+        const wb = XLSX.utils.book_new();
+        const sheets = this.grid.sheets;
+
+        Object.keys(sheets).forEach(name => {
+            const data = sheets[name];
+            const ws = data && data.length > 0
+                ? XLSX.utils.json_to_sheet(data)
+                : XLSX.utils.aoa_to_sheet([]); // 빈 시트 처리
+            XLSX.utils.book_append_sheet(wb, ws, name);
+        });
+
+        XLSX.writeFile(wb, "AI_Spreadsheet_Result.xlsx");
+    }
+}
+
+/**
+ * 3. AIEngine: 실제 ChatGPT API 연동 (데이터 샘플링 & 히스토리 추가)
+ */
+class AIEngine {
+    constructor(gridManager) {
+        this.grid = gridManager;
+        this.input = document.getElementById('ai-prompt');
+        this.apiKeyInput = document.getElementById('api-key');
+        this.loading = document.getElementById('loading');
+        this.historyContainer = document.getElementById('ai-history');
+        this.history = [];
+    }
+
+    async processCommand() {
+        const apiKey = this.apiKeyInput.value.trim();
+        const prompt = this.input.value.trim();
+        const currentData = this.grid.getCurrentData();
+
+        if (!apiKey) {
+            alert("OpenAI API Key를 먼저 입력해주세요.");
+            return;
+        }
+        if (!prompt) {
+            alert("명령어를 입력해주세요.");
+            return;
+        }
+        if (currentData.length === 0) {
+            alert("데이터가 없습니다.");
+            return;
+        }
+
+        this.setLoading(true);
+        const startTime = Date.now();
+
+        try {
+            // 데이터 샘플링: 1000행 이상이면 처음 500행 + 마지막 500행만 전송
+            let sampledData = currentData;
+            let isSampled = false;
+            const MAX_ROWS = 1000;
+
+            if (currentData.length > MAX_ROWS) {
+                const halfSize = Math.floor(MAX_ROWS / 2);
+                sampledData = [
+                    ...currentData.slice(0, halfSize),
+                    ...currentData.slice(-halfSize)
+                ];
+                isSampled = true;
+            }
+
+            // AI에게 보낼 메시지 구성
+            const messages = [
+                {
+                    role: "system",
+                    content: "You are a helpful data assistant. Output ONLY valid JSON array representing the modified data based on the user's command. Do not explain. Maintain the same keys/structure unless asked to change."
+                },
+                {
+                    role: "user",
+                    content: `Here is the current dataset in JSON${isSampled ? ' (sampled from ' + currentData.length + ' rows)' : ''}:\n${JSON.stringify(sampledData)}\n\nCommand: ${prompt}\n\nProcessed Data (JSON):`
+                }
+            ];
+
+            const response = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: "gpt-3.5-turbo",
+                    messages: messages,
+                    temperature: 0.1
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.error) {
+                throw new Error(result.error.message);
+            }
+
+            const content = result.choices[0].message.content;
+
+            // JSON 파싱 시도
+            try {
+                const newData = JSON.parse(content);
+                if (Array.isArray(newData)) {
+                    this.grid.updateCurrentSheetData(newData);
+
+                    const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1);
+                    const resultSummary = `${currentData.length}행 → ${newData.length}행 (${elapsedTime}초)`;
+
+                    this.addHistory(prompt, resultSummary, false);
+                    this.input.value = ''; // 명령어 입력창 초기화
+                } else {
+                    throw new Error("AI가 유효한 데이터 형식을 반환하지 않았습니다.");
+                }
+            } catch (e) {
+                console.error("Parsing Error:", content);
+                this.addHistory(prompt, "파싱 실패: " + e.message, true);
+                alert("AI 응답을 처리하는데 실패했습니다. AI 패널에서 자세한 내용을 확인하세요.");
+            }
+
+        } catch (error) {
+            console.error(error);
+            this.addHistory(prompt, "오류: " + error.message, true);
+            alert("오류 발생: " + error.message);
+        } finally {
+            this.setLoading(false);
+        }
+    }
+
+    // AI 히스토리 추가
+    addHistory(command, result, isError = false) {
+        const entry = {
+            time: new Date().toLocaleString('ko-KR'),
+            command,
+            result,
+            isError
+        };
+
+        this.history.unshift(entry); // 최신 항목을 위에 표시
+
+        // 히스토리는 최대 20개까지만 유지
+        if (this.history.length > 20) {
+            this.history.pop();
+        }
+
+        this.renderHistory();
+    }
+
+    // AI 히스토리 렌더링
+    renderHistory() {
+        if (!this.historyContainer) return;
+
+        this.historyContainer.innerHTML = '';
+
+        if (this.history.length === 0) {
+            this.historyContainer.innerHTML = '<div style="color: #999; text-align: center; padding: 20px;">아직 AI 작업 내역이 없습니다.</div>';
+            return;
+        }
+
+        this.history.forEach(entry => {
+            const div = document.createElement('div');
+            div.className = `ai-entry ${entry.isError ? 'ai-entry-error' : ''}`;
+
+            div.innerHTML = `
+                <div class="ai-entry-time">${entry.time}</div>
+                <div class="ai-entry-command">${entry.command}</div>
+                <div class="ai-entry-result">${entry.result}</div>
+            `;
+
+            this.historyContainer.appendChild(div);
+        });
+    }
+
+    setLoading(isLoading) {
+        this.loading.style.display = isLoading ? 'inline' : 'none';
+        document.getElementById('ai-btn').disabled = isLoading;
+    }
+}
+
+// 앱 초기화 및 실행
+const app = (() => {
+    const gridManager = new GridManager('#spreadsheet', '#sheet-tabs');
+    const excelIO = new ExcelIO(gridManager);
+    const aiEngine = new AIEngine(gridManager);
+    const aiPanel = document.getElementById('ai-panel');
+
+    // AI 패널 토글 함수
+    const toggleAIPanel = () => {
+        aiPanel.classList.toggle('collapsed');
+    };
+
+    // 초기 샘플 데이터 (빈 시트 포함 테스트)
+    gridManager.loadSheets({
+        "Sheet1": [
+            { "상품명": "사과", "단가": 1000, "수량": 5 },
+            { "상품명": "배", "단가": 2500, "수량": 3 },
+            { "상품명": "포도", "단가": 3000, "수량": 10 }
+        ],
+        "Sheet2": [
+             { "직원": "김철수", "부서": "영업" },
+             { "직원": "이영희", "부서": "개발" }
+        ],
+        "Sheet3": [] // 빈 시트 테스트
+    });
+
+    return { gridManager, excelIO, aiEngine, toggleAIPanel };
+})();
+
+</script>
+
+</body>
+</html>
