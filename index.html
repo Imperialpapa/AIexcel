@@ -60,6 +60,13 @@
 
         /* Performance Stats */
         #stats { font-size: 11px; color: #666; padding: 4px 12px; background: #fff; border-radius: 4px; }
+
+        /* File Loading Overlay */
+        #file-loading-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center; }
+        #file-loading-overlay.show { display: flex; }
+        .loading-content { background: white; padding: 30px 50px; border-radius: 8px; text-align: center; }
+        .loading-spinner { border: 4px solid #f3f3f3; border-top: 4px solid #107c41; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -99,6 +106,13 @@
             <button id="ai-panel-toggle" onclick="app.toggleAIPanel()">✕</button>
         </div>
         <div id="ai-history"></div>
+    </div>
+</div>
+
+<div id="file-loading-overlay">
+    <div class="loading-content">
+        <div class="loading-spinner"></div>
+        <div id="loading-message">파일을 불러오는 중...</div>
     </div>
 </div>
 
@@ -180,28 +194,33 @@ class GridManager {
 
         // 헤더 (Keys)
         this.currentKeys = Object.keys(data[0]);
+        const headerFragment = document.createDocumentFragment();
         this.currentKeys.forEach(key => {
             let th = document.createElement('th');
             th.textContent = key;
-            this.headerRow.appendChild(th);
+            headerFragment.appendChild(th);
         });
+        this.headerRow.appendChild(headerFragment);
 
-        // 증분 렌더링: 대용량 데이터를 부드럽게 처리
-        const BATCH_SIZE = 100; // 한 번에 렌더링할 행 수
+        // 증분 렌더링: 첫 배치는 작게, 이후는 크게
         let currentIndex = 0;
+        let batchNumber = 0;
 
         const renderBatch = () => {
+            // 첫 배치는 20행으로 빠른 피드백, 이후는 200행씩
+            const BATCH_SIZE = batchNumber === 0 ? 20 : 200;
             const fragment = document.createDocumentFragment();
             const endIndex = Math.min(currentIndex + BATCH_SIZE, data.length);
 
             for (let rowIndex = currentIndex; rowIndex < endIndex; rowIndex++) {
                 const row = data[rowIndex];
-                let tr = document.createElement('tr');
+                const tr = document.createElement('tr');
 
                 this.currentKeys.forEach(key => {
-                    let td = document.createElement('td');
+                    const td = document.createElement('td');
                     td.contentEditable = true;
-                    td.textContent = row[key] !== undefined ? row[key] : "";
+                    const value = row[key];
+                    td.textContent = value !== undefined && value !== null ? value : "";
                     tr.appendChild(td);
                 });
 
@@ -210,9 +229,11 @@ class GridManager {
 
             this.tableBody.appendChild(fragment);
             currentIndex = endIndex;
+            batchNumber++;
 
             if (currentIndex < data.length) {
-                requestAnimationFrame(renderBatch); // 다음 배치를 비동기로 처리
+                // setTimeout으로 UI 블록 방지
+                setTimeout(renderBatch, 0);
             } else {
                 const endTime = performance.now();
                 this.updateStats(data.length, this.currentKeys.length, endTime - startTime);
@@ -252,32 +273,83 @@ class ExcelIO {
     constructor(gridManager) {
         this.grid = gridManager;
         this.fileInput = document.getElementById('fileInput');
+        this.loadingOverlay = document.getElementById('file-loading-overlay');
+        this.loadingMessage = document.getElementById('loading-message');
         this.fileInput.addEventListener('change', (e) => this.handleFile(e));
     }
 
     triggerImport() { this.fileInput.click(); }
 
-    handleFile(e) {
+    showLoading(message = '파일을 불러오는 중...') {
+        this.loadingMessage.textContent = message;
+        this.loadingOverlay.classList.add('show');
+    }
+
+    hideLoading() {
+        this.loadingOverlay.classList.remove('show');
+    }
+
+    async handleFile(e) {
         const file = e.target.files[0];
         if(!file) return;
 
+        this.showLoading(`${file.name} 파일 로드 중...`);
+
+        // 같은 파일을 다시 선택할 수 있도록 초기화
+        e.target.value = '';
+
+        // UI 업데이트를 위해 약간의 지연
+        await new Promise(resolve => setTimeout(resolve, 50));
+
         const reader = new FileReader();
-        reader.onload = (event) => {
-            const data = new Uint8Array(event.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
+        reader.onload = async (event) => {
+            try {
+                this.showLoading('데이터 파싱 중...');
 
-            // 모든 시트 데이터를 객체로 변환 (빈 시트도 포함)
-            const allSheetsData = {};
-            workbook.SheetNames.forEach(sheetName => {
-                const sheet = workbook.Sheets[sheetName];
-                const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+                // UI 블록 방지를 위해 setTimeout 사용
+                await new Promise(resolve => setTimeout(resolve, 10));
 
-                // 빈 시트도 추가 (이전에는 길이가 0이면 제외했음)
-                allSheetsData[sheetName] = jsonData;
-            });
+                const data = new Uint8Array(event.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
 
-            this.grid.loadSheets(allSheetsData);
+                this.showLoading(`${workbook.SheetNames.length}개 시트 처리 중...`);
+
+                // 비동기로 시트 파싱
+                const allSheetsData = {};
+                for (let i = 0; i < workbook.SheetNames.length; i++) {
+                    const sheetName = workbook.SheetNames[i];
+                    const sheet = workbook.Sheets[sheetName];
+
+                    // UI 블록 방지
+                    if (i % 3 === 0) {
+                        this.showLoading(`시트 처리 중... (${i + 1}/${workbook.SheetNames.length})`);
+                        await new Promise(resolve => setTimeout(resolve, 0));
+                    }
+
+                    const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+                    allSheetsData[sheetName] = jsonData;
+                }
+
+                this.showLoading('화면 렌더링 중...');
+                await new Promise(resolve => setTimeout(resolve, 10));
+
+                this.grid.loadSheets(allSheetsData);
+
+                // 렌더링이 시작된 후 로딩 숨김
+                setTimeout(() => this.hideLoading(), 100);
+
+            } catch (error) {
+                console.error('파일 로드 오류:', error);
+                alert('파일을 불러오는 중 오류가 발생했습니다: ' + error.message);
+                this.hideLoading();
+            }
         };
+
+        reader.onerror = () => {
+            alert('파일을 읽는 중 오류가 발생했습니다.');
+            this.hideLoading();
+        };
+
         reader.readAsArrayBuffer(file);
     }
 
@@ -293,7 +365,7 @@ class ExcelIO {
             XLSX.utils.book_append_sheet(wb, ws, name);
         });
 
-        XLSX.writeFile(wb, "AI_Spreadsheet_Result.xlsx");
+        XLSX.writeFile(wb, "K-IFRS_Data_Validation_Result.xlsx");
     }
 }
 
