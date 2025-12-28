@@ -1827,57 +1827,82 @@ class ExcelIO {
     exportFile() {
         let wb;
 
-        // 원본 워크북이 있으면 복제하여 사용 (수식/서식 보존)
+        // 원본 워크북이 있으면 효율적으로 복제하여 수정 (수식/서식 보존 + 파일 크기 유지)
         if (this.originalWorkbook) {
-            wb = XLSX.utils.book_new();
-            wb.Props = this.originalWorkbook.Props;
-            wb.SheetNames = this.originalWorkbook.SheetNames.slice();
+            // Shallow copy로 워크북 복제 (메모리 효율적)
+            wb = {
+                SheetNames: this.originalWorkbook.SheetNames.slice(),
+                Sheets: {},
+                Props: this.originalWorkbook.Props
+            };
 
             const sheets = this.grid.sheets;
 
+            // 각 시트를 복제하되, 셀 객체는 공유 (수정된 셀만 새로 생성)
             wb.SheetNames.forEach(sheetName => {
                 const data = sheets[sheetName];
+                const originalSheet = this.originalWorkbook.Sheets[sheetName];
 
-                if (!data || data.length === 0) {
-                    // 빈 시트는 원본 그대로 유지
-                    wb.Sheets[sheetName] = this.originalSheets[sheetName] || XLSX.utils.aoa_to_sheet([]);
-                } else {
-                    // 원본 시트 복제
-                    const originalSheet = this.originalSheets[sheetName];
-                    if (originalSheet) {
-                        // 원본 시트를 복사
-                        const newSheet = JSON.parse(JSON.stringify(originalSheet));
-
-                        // 편집된 데이터로 셀 값 업데이트
-                        const keys = Object.keys(data[0] || {});
-                        data.forEach((row, rowIndex) => {
-                            keys.forEach((key, colIndex) => {
-                                const cellAddress = XLSX.utils.encode_cell({ r: rowIndex + 1, c: colIndex }); // +1 for header
-                                const value = row[key];
-
-                                if (newSheet[cellAddress]) {
-                                    // 기존 셀이 있으면 값만 업데이트 (수식이 없는 경우)
-                                    if (!newSheet[cellAddress].f) {
-                                        newSheet[cellAddress].v = value;
-                                        newSheet[cellAddress].w = value !== undefined && value !== null ? String(value) : "";
-                                    }
-                                } else {
-                                    // 새로운 셀 생성
-                                    newSheet[cellAddress] = {
-                                        v: value,
-                                        t: typeof value === 'number' ? 'n' : 's',
-                                        w: value !== undefined && value !== null ? String(value) : ""
-                                    };
-                                }
-                            });
-                        });
-
-                        wb.Sheets[sheetName] = newSheet;
-                    } else {
-                        // 원본이 없으면 새로 생성
-                        wb.Sheets[sheetName] = XLSX.utils.json_to_sheet(data);
-                    }
+                if (!data || data.length === 0 || !originalSheet) {
+                    // 빈 시트나 원본이 없는 경우 원본 그대로 참조
+                    wb.Sheets[sheetName] = originalSheet;
+                    return;
                 }
+
+                // 새 시트 객체 생성 (원본 메타데이터 복사)
+                const newSheet = {
+                    '!ref': originalSheet['!ref'],
+                    '!margins': originalSheet['!margins'],
+                    '!cols': originalSheet['!cols'],
+                    '!rows': originalSheet['!rows'],
+                    '!merges': originalSheet['!merges'],
+                    '!protect': originalSheet['!protect'],
+                    '!autofilter': originalSheet['!autofilter']
+                };
+
+                // 모든 셀 복사 (수정되지 않은 셀은 참조만)
+                const keys = Object.keys(data[0] || {});
+                const editedCells = new Set();
+
+                // 편집된 셀 주소 계산
+                data.forEach((row, rowIndex) => {
+                    keys.forEach((key, colIndex) => {
+                        const cellAddress = XLSX.utils.encode_cell({ r: rowIndex + 1, c: colIndex });
+                        editedCells.add(cellAddress);
+                    });
+                });
+
+                // 원본 시트의 모든 셀 복사
+                Object.keys(originalSheet).forEach(key => {
+                    if (key.startsWith('!')) return; // 메타데이터는 이미 복사됨
+
+                    if (editedCells.has(key)) {
+                        // 편집된 셀: 값 업데이트
+                        const cell = originalSheet[key];
+                        if (cell.f) {
+                            // 수식이 있는 셀은 그대로 참조
+                            newSheet[key] = cell;
+                        } else {
+                            // 수식이 없는 셀만 새로 생성하여 값 업데이트
+                            const decoded = XLSX.utils.decode_cell(key);
+                            const rowIndex = decoded.r - 1; // -1 for header
+                            const colIndex = decoded.c;
+                            const keyName = keys[colIndex];
+                            const value = data[rowIndex]?.[keyName];
+
+                            newSheet[key] = {
+                                ...cell,
+                                v: value,
+                                w: value !== undefined && value !== null ? String(value) : ""
+                            };
+                        }
+                    } else {
+                        // 편집되지 않은 셀: 그대로 참조
+                        newSheet[key] = originalSheet[key];
+                    }
+                });
+
+                wb.Sheets[sheetName] = newSheet;
             });
         } else {
             // 원본 워크북이 없으면 기존 방식대로
@@ -1888,12 +1913,16 @@ class ExcelIO {
                 const data = sheets[name];
                 const ws = data && data.length > 0
                     ? XLSX.utils.json_to_sheet(data)
-                    : XLSX.utils.aoa_to_sheet([]); // 빈 시트 처리
+                    : XLSX.utils.aoa_to_sheet([]);
                 XLSX.utils.book_append_sheet(wb, ws, name);
             });
         }
 
-        XLSX.writeFile(wb, "K-IFRS_Data_Validation_Result.xlsx");
+        // 압축 옵션을 추가하여 파일 크기 최적화
+        XLSX.writeFile(wb, "K-IFRS_Data_Validation_Result.xlsx", {
+            compression: true,
+            bookType: 'xlsx'
+        });
     }
 }
 
