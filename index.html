@@ -114,6 +114,33 @@
         /* Selection */
         td.selected { background: #cce5ff !important; }
         tr.selected td { background: #e6f2ff !important; }
+
+        /* Filter UI */
+        .filter-icon { cursor: pointer; margin-left: 5px; color: #666; }
+        .filter-icon:hover { color: #107c41; }
+        .filter-popup { display: none; position: absolute; background: white; border: 1px solid #ccc; box-shadow: 0 2px 8px rgba(0,0,0,0.15); min-width: 200px; padding: 10px; z-index: 1000; }
+        .filter-popup.show { display: block; }
+        .filter-option { padding: 4px 0; }
+        .filter-option input { margin-right: 5px; }
+
+        /* Search Dialog */
+        #search-dialog, #validation-dialog { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; box-shadow: 0 4px 16px rgba(0,0,0,0.2); padding: 20px; min-width: 400px; z-index: 10000; }
+        #search-dialog.show, #validation-dialog.show { display: block; }
+        .dialog-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.3); z-index: 9999; }
+        .dialog-overlay.show { display: block; }
+        .dialog-title { font-size: 16px; font-weight: bold; margin-bottom: 15px; }
+        .dialog-row { margin-bottom: 10px; }
+        .dialog-label { display: inline-block; width: 100px; }
+        .dialog-input { width: 250px; padding: 5px; border: 1px solid #ccc; border-radius: 3px; }
+        .dialog-buttons { margin-top: 15px; text-align: right; }
+        .dialog-btn { padding: 6px 15px; margin-left: 5px; cursor: pointer; border: none; border-radius: 3px; }
+        .dialog-btn-primary { background: #107c41; color: white; }
+        .dialog-btn-secondary { background: #e0e0e0; }
+
+        /* Formula Bar */
+        #formula-bar { background: #fff; border-bottom: 1px solid #d0d0d0; padding: 5px 8px; display: flex; align-items: center; gap: 8px; }
+        #formula-input { flex: 1; padding: 5px; border: 1px solid #ccc; border-radius: 3px; font-family: 'Consolas', monospace; }
+        #cell-reference { font-weight: bold; min-width: 80px; }
     </style>
 </head>
 <body>
@@ -158,6 +185,12 @@
     <div class="toolbar-section">
         <button class="toolbar-btn" onclick="app.sortManager.sortAscending()">↑ 오름차순</button>
         <button class="toolbar-btn" onclick="app.sortManager.sortDescending()">↓ 내림차순</button>
+        <button class="toolbar-btn" onclick="app.filterManager.toggleFilter()">🔍 필터</button>
+    </div>
+
+    <div class="toolbar-section">
+        <button class="toolbar-btn" onclick="app.searchManager.showSearchDialog()">🔎 검색</button>
+        <button class="toolbar-btn" onclick="app.validationManager.showDialog()">✓ 유효성</button>
     </div>
 
     <div class="toolbar-section">
@@ -171,6 +204,12 @@
     <div class="toolbar-section">
         <span id="stats"></span>
     </div>
+</div>
+
+<!-- Formula Bar -->
+<div id="formula-bar">
+    <span id="cell-reference">-</span>
+    <input type="text" id="formula-input" placeholder="수식 또는 값 입력 (예: =SUM(A1:A10))" />
 </div>
 
 <div id="main-content">
@@ -203,6 +242,62 @@
 
 <!-- Context Menu -->
 <div id="context-menu"></div>
+
+<!-- Search Dialog -->
+<div class="dialog-overlay" id="search-overlay"></div>
+<div id="search-dialog">
+    <div class="dialog-title">검색 및 바꾸기</div>
+    <div class="dialog-row">
+        <label class="dialog-label">검색:</label>
+        <input type="text" id="search-find" class="dialog-input" />
+    </div>
+    <div class="dialog-row">
+        <label class="dialog-label">바꾸기:</label>
+        <input type="text" id="search-replace" class="dialog-input" />
+    </div>
+    <div class="dialog-row">
+        <label class="dialog-label"></label>
+        <input type="checkbox" id="search-case-sensitive" />
+        <label>대소문자 구분</label>
+    </div>
+    <div class="dialog-buttons">
+        <button class="dialog-btn dialog-btn-primary" onclick="app.searchManager.findNext()">다음 찾기</button>
+        <button class="dialog-btn dialog-btn-primary" onclick="app.searchManager.replaceOne()">바꾸기</button>
+        <button class="dialog-btn dialog-btn-primary" onclick="app.searchManager.replaceAll()">모두 바꾸기</button>
+        <button class="dialog-btn dialog-btn-secondary" onclick="app.searchManager.hideSearchDialog()">닫기</button>
+    </div>
+</div>
+
+<!-- Validation Dialog -->
+<div class="dialog-overlay" id="validation-overlay"></div>
+<div id="validation-dialog">
+    <div class="dialog-title">데이터 유효성 검사</div>
+    <div class="dialog-row">
+        <label class="dialog-label">규칙 유형:</label>
+        <select id="validation-type" class="dialog-input">
+            <option value="number">숫자</option>
+            <option value="text">텍스트 길이</option>
+            <option value="list">목록</option>
+            <option value="date">날짜</option>
+        </select>
+    </div>
+    <div class="dialog-row">
+        <label class="dialog-label">최소값:</label>
+        <input type="text" id="validation-min" class="dialog-input" />
+    </div>
+    <div class="dialog-row">
+        <label class="dialog-label">최대값:</label>
+        <input type="text" id="validation-max" class="dialog-input" />
+    </div>
+    <div class="dialog-row">
+        <label class="dialog-label">목록 (콤마 구분):</label>
+        <input type="text" id="validation-list" class="dialog-input" placeholder="예: 승인,대기,거부" />
+    </div>
+    <div class="dialog-buttons">
+        <button class="dialog-btn dialog-btn-primary" onclick="app.validationManager.apply()">적용</button>
+        <button class="dialog-btn dialog-btn-secondary" onclick="app.validationManager.hideDialog()">취소</button>
+    </div>
+</div>
 
 <script>
 /**
@@ -511,7 +606,524 @@ class SortManager {
 }
 
 /**
- * 5. GridManager: 멀티 시트 관리 및 렌더링 (최적화 버전)
+ * 5. Filter Manager
+ */
+class FilterManager {
+    constructor(gridManager) {
+        this.grid = gridManager;
+        this.filterEnabled = false;
+        this.filteredData = null;
+        this.originalData = null;
+    }
+
+    toggleFilter() {
+        this.filterEnabled = !this.filterEnabled;
+
+        if (this.filterEnabled) {
+            this.showFilterIcons();
+            alert('필터가 활성화되었습니다. 열 헤더의 필터 아이콘을 클릭하세요.');
+        } else {
+            this.clearFilter();
+        }
+    }
+
+    showFilterIcons() {
+        // 헤더에 필터 아이콘 추가
+        const headers = document.querySelectorAll('#header-row th');
+        headers.forEach(th => {
+            if (!th.querySelector('.filter-icon')) {
+                const icon = document.createElement('span');
+                icon.className = 'filter-icon';
+                icon.textContent = '▼';
+                icon.onclick = (e) => {
+                    e.stopPropagation();
+                    this.showFilterPopup(th);
+                };
+                th.appendChild(icon);
+            }
+        });
+    }
+
+    showFilterPopup(headerElement) {
+        const colName = headerElement.textContent.replace('▼', '').trim();
+        const data = this.grid.getCurrentData();
+
+        // 고유 값 추출
+        const uniqueValues = [...new Set(data.map(row => row[colName]))].sort();
+
+        // 팝업 생성
+        const popup = document.createElement('div');
+        popup.className = 'filter-popup show';
+        popup.style.left = headerElement.offsetLeft + 'px';
+        popup.style.top = (headerElement.offsetTop + headerElement.offsetHeight) + 'px';
+
+        popup.innerHTML = '<div><strong>값 선택:</strong></div>';
+
+        // "전체 선택" 옵션
+        const allOption = document.createElement('div');
+        allOption.className = 'filter-option';
+        allOption.innerHTML = `<input type="checkbox" checked onchange="app.filterManager.toggleAllFilters(this, '${colName}')"> (전체 선택)`;
+        popup.appendChild(allOption);
+
+        // 각 값에 대한 체크박스
+        uniqueValues.forEach(value => {
+            const option = document.createElement('div');
+            option.className = 'filter-option';
+            option.innerHTML = `<input type="checkbox" checked data-value="${value}" data-col="${colName}"> ${value}`;
+            popup.appendChild(option);
+        });
+
+        // 적용 버튼
+        const applyBtn = document.createElement('button');
+        applyBtn.className = 'toolbar-btn';
+        applyBtn.textContent = '적용';
+        applyBtn.style.marginTop = '10px';
+        applyBtn.onclick = () => {
+            this.applyFilter(popup, colName);
+            document.body.removeChild(popup);
+        };
+        popup.appendChild(applyBtn);
+
+        // 기존 팝업 제거
+        document.querySelectorAll('.filter-popup').forEach(p => p.remove());
+
+        document.body.appendChild(popup);
+
+        // 외부 클릭 시 닫기
+        setTimeout(() => {
+            document.addEventListener('click', function closePopup(e) {
+                if (!popup.contains(e.target)) {
+                    popup.remove();
+                    document.removeEventListener('click', closePopup);
+                }
+            });
+        }, 100);
+    }
+
+    toggleAllFilters(checkbox, colName) {
+        const popup = checkbox.closest('.filter-popup');
+        const checkboxes = popup.querySelectorAll(`input[data-col="${colName}"]`);
+        checkboxes.forEach(cb => cb.checked = checkbox.checked);
+    }
+
+    applyFilter(popup, colName) {
+        const checkedValues = Array.from(popup.querySelectorAll(`input[data-col="${colName}"]:checked`))
+            .map(cb => cb.dataset.value);
+
+        const data = this.grid.getCurrentData();
+        const filtered = data.filter(row => checkedValues.includes(String(row[colName])));
+
+        this.grid.renderGrid(filtered);
+    }
+
+    clearFilter() {
+        // 필터 아이콘 제거
+        document.querySelectorAll('.filter-icon').forEach(icon => icon.remove());
+
+        // 원본 데이터로 복원
+        if (this.originalData) {
+            this.grid.renderGrid(this.originalData);
+            this.originalData = null;
+        }
+    }
+}
+
+/**
+ * 6. Search Manager
+ */
+class SearchManager {
+    constructor(gridManager) {
+        this.grid = gridManager;
+        this.currentMatchIndex = -1;
+        this.matches = [];
+    }
+
+    showSearchDialog() {
+        document.getElementById('search-overlay').classList.add('show');
+        document.getElementById('search-dialog').classList.add('show');
+        document.getElementById('search-find').focus();
+    }
+
+    hideSearchDialog() {
+        document.getElementById('search-overlay').classList.remove('show');
+        document.getElementById('search-dialog').classList.remove('show');
+    }
+
+    findNext() {
+        const searchText = document.getElementById('search-find').value;
+        const caseSensitive = document.getElementById('search-case-sensitive').checked;
+
+        if (!searchText) {
+            alert('검색할 텍스트를 입력하세요.');
+            return;
+        }
+
+        // 모든 셀에서 검색
+        const cells = Array.from(document.querySelectorAll('#table-body td'));
+        this.matches = cells.filter(cell => {
+            const cellText = cell.textContent;
+            return caseSensitive
+                ? cellText.includes(searchText)
+                : cellText.toLowerCase().includes(searchText.toLowerCase());
+        });
+
+        if (this.matches.length === 0) {
+            alert('찾을 수 없습니다.');
+            return;
+        }
+
+        // 다음 일치 항목으로 이동
+        this.currentMatchIndex = (this.currentMatchIndex + 1) % this.matches.length;
+        const match = this.matches[this.currentMatchIndex];
+
+        // 선택 해제
+        document.querySelectorAll('td.selected').forEach(td => td.classList.remove('selected'));
+
+        // 일치 항목 선택 및 스크롤
+        match.classList.add('selected');
+        match.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        alert(`${this.currentMatchIndex + 1}/${this.matches.length} 찾음`);
+    }
+
+    replaceOne() {
+        if (this.matches.length === 0) {
+            alert('먼저 "다음 찾기"를 클릭하세요.');
+            return;
+        }
+
+        const replaceText = document.getElementById('search-replace').value;
+        const currentCell = this.matches[this.currentMatchIndex];
+
+        if (currentCell) {
+            currentCell.textContent = replaceText;
+
+            // 데이터 업데이트
+            const rowIndex = currentCell.parentElement.rowIndex - 1;
+            const cellIndex = currentCell.cellIndex;
+            const key = this.grid.currentKeys[cellIndex];
+            if (key && this.grid.sheets[this.grid.currentSheetName] && this.grid.sheets[this.grid.currentSheetName][rowIndex]) {
+                this.grid.sheets[this.grid.currentSheetName][rowIndex][key] = isNaN(replaceText) ? replaceText : Number(replaceText);
+            }
+
+            alert('바꾸기 완료');
+        }
+    }
+
+    replaceAll() {
+        const searchText = document.getElementById('search-find').value;
+        const replaceText = document.getElementById('search-replace').value;
+        const caseSensitive = document.getElementById('search-case-sensitive').checked;
+
+        if (!searchText) {
+            alert('검색할 텍스트를 입력하세요.');
+            return;
+        }
+
+        let count = 0;
+        const cells = Array.from(document.querySelectorAll('#table-body td'));
+
+        cells.forEach(cell => {
+            const cellText = cell.textContent;
+            const matches = caseSensitive
+                ? cellText === searchText
+                : cellText.toLowerCase() === searchText.toLowerCase();
+
+            if (matches) {
+                cell.textContent = replaceText;
+
+                // 데이터 업데이트
+                const rowIndex = cell.parentElement.rowIndex - 1;
+                const cellIndex = cell.cellIndex;
+                const key = this.grid.currentKeys[cellIndex];
+                if (key && this.grid.sheets[this.grid.currentSheetName] && this.grid.sheets[this.grid.currentSheetName][rowIndex]) {
+                    this.grid.sheets[this.grid.currentSheetName][rowIndex][key] = isNaN(replaceText) ? replaceText : Number(replaceText);
+                }
+
+                count++;
+            }
+        });
+
+        alert(`${count}개 항목을 바꿨습니다.`);
+    }
+}
+
+/**
+ * 7. Validation Manager
+ */
+class ValidationManager {
+    constructor(gridManager) {
+        this.grid = gridManager;
+        this.rules = {}; // { cellId: { type, min, max, list } }
+    }
+
+    showDialog() {
+        const selected = document.querySelector('td.selected');
+        if (!selected) {
+            alert('유효성 검사를 적용할 셀을 선택하세요.');
+            return;
+        }
+
+        document.getElementById('validation-overlay').classList.add('show');
+        document.getElementById('validation-dialog').classList.add('show');
+    }
+
+    hideDialog() {
+        document.getElementById('validation-overlay').classList.remove('show');
+        document.getElementById('validation-dialog').classList.remove('show');
+    }
+
+    apply() {
+        const selectedCells = document.querySelectorAll('td.selected');
+        if (selectedCells.length === 0) {
+            alert('셀을 선택하세요.');
+            return;
+        }
+
+        const type = document.getElementById('validation-type').value;
+        const min = document.getElementById('validation-min').value;
+        const max = document.getElementById('validation-max').value;
+        const list = document.getElementById('validation-list').value;
+
+        selectedCells.forEach(cell => {
+            const cellId = `${cell.parentElement.rowIndex}-${cell.cellIndex}`;
+            this.rules[cellId] = { type, min, max, list };
+
+            // 시각적 표시
+            cell.style.border = '2px solid #2196F3';
+            cell.title = `유효성 검사: ${type}`;
+
+            // blur 이벤트로 검증
+            cell.addEventListener('blur', () => this.validate(cell, cellId));
+        });
+
+        this.hideDialog();
+        alert('유효성 검사 규칙이 적용되었습니다.');
+    }
+
+    validate(cell, cellId) {
+        const rule = this.rules[cellId];
+        if (!rule) return true;
+
+        const value = cell.textContent.trim();
+
+        switch (rule.type) {
+            case 'number':
+                const num = Number(value);
+                if (isNaN(num)) {
+                    alert('숫자를 입력하세요.');
+                    cell.style.backgroundColor = '#ffebee';
+                    return false;
+                }
+                if (rule.min && num < Number(rule.min)) {
+                    alert(`최소값은 ${rule.min}입니다.`);
+                    cell.style.backgroundColor = '#ffebee';
+                    return false;
+                }
+                if (rule.max && num > Number(rule.max)) {
+                    alert(`최대값은 ${rule.max}입니다.`);
+                    cell.style.backgroundColor = '#ffebee';
+                    return false;
+                }
+                break;
+
+            case 'text':
+                if (rule.min && value.length < Number(rule.min)) {
+                    alert(`최소 ${rule.min}자 이상 입력하세요.`);
+                    cell.style.backgroundColor = '#ffebee';
+                    return false;
+                }
+                if (rule.max && value.length > Number(rule.max)) {
+                    alert(`최대 ${rule.max}자까지 입력 가능합니다.`);
+                    cell.style.backgroundColor = '#ffebee';
+                    return false;
+                }
+                break;
+
+            case 'list':
+                const allowedValues = rule.list.split(',').map(v => v.trim());
+                if (!allowedValues.includes(value)) {
+                    alert(`허용된 값: ${rule.list}`);
+                    cell.style.backgroundColor = '#ffebee';
+                    return false;
+                }
+                break;
+        }
+
+        cell.style.backgroundColor = '';
+        return true;
+    }
+}
+
+/**
+ * 8. Formula Engine
+ */
+class FormulaEngine {
+    constructor(gridManager) {
+        this.grid = gridManager;
+        this.formulaBar = document.getElementById('formula-input');
+        this.cellRef = document.getElementById('cell-reference');
+        this.currentCell = null;
+        this.setupEvents();
+    }
+
+    setupEvents() {
+        // 셀 선택 시 수식 바 업데이트
+        document.addEventListener('click', (e) => {
+            if (e.target.tagName === 'TD') {
+                this.currentCell = e.target;
+                this.updateFormulaBar();
+            }
+        });
+
+        // 수식 바 엔터 키
+        this.formulaBar.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                this.applyFormula();
+            }
+        });
+    }
+
+    updateFormulaBar() {
+        if (!this.currentCell) return;
+
+        const rowIndex = this.currentCell.parentElement.rowIndex;
+        const colIndex = this.currentCell.cellIndex;
+        const colLetter = this.numberToColumn(colIndex);
+
+        this.cellRef.textContent = `${colLetter}${rowIndex}`;
+        this.formulaBar.value = this.currentCell.textContent;
+    }
+
+    applyFormula() {
+        if (!this.currentCell) return;
+
+        const formula = this.formulaBar.value.trim();
+
+        if (formula.startsWith('=')) {
+            const result = this.evaluateFormula(formula);
+            this.currentCell.textContent = result;
+        } else {
+            this.currentCell.textContent = formula;
+        }
+
+        // 데이터 업데이트
+        const rowIndex = this.currentCell.parentElement.rowIndex - 1;
+        const cellIndex = this.currentCell.cellIndex;
+        const key = this.grid.currentKeys[cellIndex];
+        if (key && this.grid.sheets[this.grid.currentSheetName] && this.grid.sheets[this.grid.currentSheetName][rowIndex]) {
+            const value = this.currentCell.textContent;
+            this.grid.sheets[this.grid.currentSheetName][rowIndex][key] = isNaN(value) ? value : Number(value);
+        }
+    }
+
+    evaluateFormula(formula) {
+        try {
+            // =SUM(A1:A10) 형식 처리
+            if (formula.toUpperCase().startsWith('=SUM(')) {
+                return this.handleSUM(formula);
+            }
+            // =AVERAGE(A1:A10)
+            else if (formula.toUpperCase().startsWith('=AVERAGE(')) {
+                return this.handleAVERAGE(formula);
+            }
+            // =COUNT(A1:A10)
+            else if (formula.toUpperCase().startsWith('=COUNT(')) {
+                return this.handleCOUNT(formula);
+            }
+            // =MAX(A1:A10)
+            else if (formula.toUpperCase().startsWith('=MAX(')) {
+                return this.handleMAX(formula);
+            }
+            // =MIN(A1:A10)
+            else if (formula.toUpperCase().startsWith('=MIN(')) {
+                return this.handleMIN(formula);
+            }
+            else {
+                return '#ERROR: 지원하지 않는 수식';
+            }
+        } catch (e) {
+            return '#ERROR';
+        }
+    }
+
+    handleSUM(formula) {
+        const values = this.getRangeValues(formula);
+        return values.reduce((sum, val) => sum + (Number(val) || 0), 0);
+    }
+
+    handleAVERAGE(formula) {
+        const values = this.getRangeValues(formula);
+        const sum = values.reduce((sum, val) => sum + (Number(val) || 0), 0);
+        return values.length > 0 ? sum / values.length : 0;
+    }
+
+    handleCOUNT(formula) {
+        const values = this.getRangeValues(formula);
+        return values.filter(v => v !== '' && v !== null && v !== undefined).length;
+    }
+
+    handleMAX(formula) {
+        const values = this.getRangeValues(formula).map(v => Number(v) || 0);
+        return Math.max(...values);
+    }
+
+    handleMIN(formula) {
+        const values = this.getRangeValues(formula).map(v => Number(v) || 0);
+        return Math.min(...values);
+    }
+
+    getRangeValues(formula) {
+        // "=SUM(A1:A10)" -> "A1:A10" 추출
+        const match = formula.match(/\((.+)\)/);
+        if (!match) return [];
+
+        const range = match[1];
+
+        // 단일 셀 또는 범위
+        if (range.includes(':')) {
+            // 범위: A1:A10
+            const [start, end] = range.split(':');
+            return this.getCellsInRange(start, end);
+        } else {
+            // 단일 셀: A1
+            return [this.getCellValue(range)];
+        }
+    }
+
+    getCellsInRange(start, end) {
+        const values = [];
+        const data = this.grid.getCurrentData();
+
+        // 간단 구현: 열 기준 범위만 지원 (A1:A10)
+        const colName = this.grid.currentKeys[0]; // 첫 번째 열
+        const startRow = parseInt(start.replace(/[A-Z]/g, '')) - 1;
+        const endRow = parseInt(end.replace(/[A-Z]/g, '')) - 1;
+
+        for (let i = startRow; i <= endRow && i < data.length; i++) {
+            values.push(data[i][colName]);
+        }
+
+        return values;
+    }
+
+    getCellValue(cellRef) {
+        // 간단 구현
+        return 0;
+    }
+
+    numberToColumn(num) {
+        let column = '';
+        while (num >= 0) {
+            column = String.fromCharCode((num % 26) + 65) + column;
+            num = Math.floor(num / 26) - 1;
+        }
+        return column;
+    }
+}
+
+/**
+ * 9. GridManager: 멀티 시트 관리 및 렌더링 (최적화 버전)
  */
 class GridManager {
     constructor(tableId, tabsId) {
@@ -992,6 +1604,10 @@ const app = (() => {
     const cellFormatter = new CellFormatter(gridManager);
     const rowColumnManager = new RowColumnManager(gridManager);
     const sortManager = new SortManager(gridManager);
+    const filterManager = new FilterManager(gridManager);
+    const searchManager = new SearchManager(gridManager);
+    const validationManager = new ValidationManager(gridManager);
+    const formulaEngine = new FormulaEngine(gridManager);
 
     const aiPanel = document.getElementById('ai-panel');
     const resizer = document.getElementById('ai-panel-resizer');
@@ -1060,6 +1676,11 @@ const app = (() => {
                 gridManager.pasteCells();
             }
         }
+        // Ctrl+F: 검색
+        if (e.ctrlKey && e.key === 'f') {
+            e.preventDefault();
+            searchManager.showSearchDialog();
+        }
     });
 
     // 초기 데이터 없음 - 사용자가 엑셀 파일을 열어야 함
@@ -1077,6 +1698,10 @@ const app = (() => {
         cellFormatter,
         rowColumnManager,
         sortManager,
+        filterManager,
+        searchManager,
+        validationManager,
+        formulaEngine,
         toggleAIPanel
     };
 })();
