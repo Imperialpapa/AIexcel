@@ -2193,18 +2193,24 @@ const app = (() => {
 
     // 키보드 단축키
     document.addEventListener('keydown', (e) => {
+        // 입력 필드에서는 기본 동작 허용 (복사/붙여넣기 등)
+        const target = e.target;
+        const isInputField = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
+                            target.id === 'formula-input' || target.id === 'ai-prompt' ||
+                            target.id === 'api-key' || target.id === 'search-find';
+
         // Ctrl+Z: 실행 취소
-        if (e.ctrlKey && e.key === 'z') {
+        if (e.ctrlKey && e.key === 'z' && !isInputField) {
             e.preventDefault();
             commandManager.undo();
         }
         // Ctrl+Y: 다시 실행
-        if (e.ctrlKey && e.key === 'y') {
+        if (e.ctrlKey && e.key === 'y' && !isInputField) {
             e.preventDefault();
             commandManager.redo();
         }
         // Ctrl+C: 복사
-        if (e.ctrlKey && e.key === 'c') {
+        if (e.ctrlKey && e.key === 'c' && !isInputField) {
             const selectedCells = document.querySelectorAll('td.selected');
             if (selectedCells.length > 0) {
                 e.preventDefault();
@@ -2212,7 +2218,7 @@ const app = (() => {
             }
         }
         // Ctrl+V: 붙여넣기
-        if (e.ctrlKey && e.key === 'v') {
+        if (e.ctrlKey && e.key === 'v' && !isInputField) {
             const selectedCells = document.querySelectorAll('td.selected');
             if (selectedCells.length > 0) {
                 e.preventDefault();
