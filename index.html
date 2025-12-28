@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>AI Smart Spreadsheet (Multi-sheet & GPT)</title>
+    <title>K-IFRS 데이터 검증</title>
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
@@ -29,8 +29,10 @@
         .sheet-tab.empty { color: #999; font-style: italic; }
 
         /* AI Side Panel */
-        #ai-panel { width: 320px; border-left: 2px solid #ccc; background: #f9f9f9; display: flex; flex-direction: column; overflow: hidden; }
-        #ai-panel.collapsed { width: 0; border: none; }
+        #ai-panel { width: 320px; min-width: 200px; max-width: 600px; border-left: 2px solid #ccc; background: #f9f9f9; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+        #ai-panel.collapsed { width: 0; min-width: 0; border: none; }
+        #ai-panel-resizer { width: 6px; height: 100%; position: absolute; left: 0; top: 0; cursor: col-resize; background: transparent; z-index: 100; }
+        #ai-panel-resizer:hover { background: #107c41; opacity: 0.3; }
         #ai-panel-header { padding: 12px; background: #107c41; color: white; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
         #ai-panel-toggle { background: transparent; border: none; color: white; cursor: pointer; font-size: 18px; padding: 4px; }
         #ai-history { flex: 1; overflow-y: auto; padding: 10px; }
@@ -40,6 +42,8 @@
         .ai-entry-result { color: #333; }
         .ai-entry-error { border-left-color: #d32f2f; }
         .ai-entry-error .ai-entry-command { color: #d32f2f; }
+        body.resizing { cursor: col-resize; user-select: none; }
+        body.resizing * { cursor: col-resize !important; }
 
         /* AI & UI Components */
         .btn { padding: 8px 14px; cursor: pointer; background: #107c41; color: white; border: none; border-radius: 4px; font-weight: 500; transition: 0.2s; }
@@ -89,6 +93,7 @@
     </div>
 
     <div id="ai-panel">
+        <div id="ai-panel-resizer"></div>
         <div id="ai-panel-header">
             <span>AI 작업 히스토리</span>
             <button id="ai-panel-toggle" onclick="app.toggleAIPanel()">✕</button>
@@ -459,25 +464,47 @@ const app = (() => {
     const excelIO = new ExcelIO(gridManager);
     const aiEngine = new AIEngine(gridManager);
     const aiPanel = document.getElementById('ai-panel');
+    const resizer = document.getElementById('ai-panel-resizer');
 
     // AI 패널 토글 함수
     const toggleAIPanel = () => {
         aiPanel.classList.toggle('collapsed');
     };
 
-    // 초기 샘플 데이터 (빈 시트 포함 테스트)
-    gridManager.loadSheets({
-        "Sheet1": [
-            { "상품명": "사과", "단가": 1000, "수량": 5 },
-            { "상품명": "배", "단가": 2500, "수량": 3 },
-            { "상품명": "포도", "단가": 3000, "수량": 10 }
-        ],
-        "Sheet2": [
-             { "직원": "김철수", "부서": "영업" },
-             { "직원": "이영희", "부서": "개발" }
-        ],
-        "Sheet3": [] // 빈 시트 테스트
+    // AI 패널 리사이즈 기능
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        startX = e.clientX;
+        startWidth = aiPanel.offsetWidth;
+        document.body.classList.add('resizing');
+        e.preventDefault();
     });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+
+        const diff = startX - e.clientX; // 왼쪽으로 드래그하면 양수
+        const newWidth = startWidth + diff;
+
+        // 최소/최대 너비 제한
+        if (newWidth >= 200 && newWidth <= 600) {
+            aiPanel.style.width = newWidth + 'px';
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            document.body.classList.remove('resizing');
+        }
+    });
+
+    // 초기 데이터 없음 - 사용자가 엑셀 파일을 열어야 함
+    gridManager.loadSheets({});
 
     return { gridManager, excelIO, aiEngine, toggleAIPanel };
 })();
