@@ -1798,12 +1798,12 @@ class ExcelIO {
                         }
                     }
 
-                    // 모든 데이터를 보존하기 위해 raw 데이터 형식 사용
-                    // header: 1 = 배열 형태로 반환 (모든 행 포함)
+                    // 완전한 원본 보존: 모든 열과 행을 정확히 그대로 유지
+                    // header: 1 = 2D 배열 형태로 반환
                     const rawData = XLSX.utils.sheet_to_json(sheet, {
                         header: 1,  // 배열 형태
-                        defval: "",
-                        blankrows: false,
+                        defval: null,  // 빈 셀은 null로 (undefined 방지)
+                        blankrows: true,  // 빈 행도 포함
                         raw: false  // 포맷된 값 사용
                     });
 
@@ -1813,24 +1813,22 @@ class ExcelIO {
                         return;
                     }
 
-                    // 첫 행을 헤더로 사용하되, 빈 헤더 처리
-                    const headers = rawData[0];
-                    let emptyCount = 0;
-                    const processedHeaders = headers.map((h, idx) => {
-                        if (h === null || h === undefined || h === '') {
-                            const key = emptyCount === 0 ? '__EMPTY' : `__EMPTY_${emptyCount}`;
-                            emptyCount++;
-                            return key;
-                        }
-                        return String(h);
-                    });
+                    // 최대 열 수 계산 (모든 행 중 가장 긴 행 기준)
+                    const maxCols = Math.max(...rawData.map(row => row ? row.length : 0));
 
-                    // 모든 행을 객체로 변환 (첫 행도 데이터로 포함)
+                    // 열 이름 생성: Col0, Col1, Col2, ... (위치 보존)
+                    const colNames = [];
+                    for (let i = 0; i < maxCols; i++) {
+                        colNames.push(`Col${i}`);
+                    }
+
+                    // 모든 행을 객체로 변환 (빈 셀도 정확한 위치에 보존)
                     const objectData = rawData.map(row => {
                         const obj = {};
-                        processedHeaders.forEach((header, idx) => {
-                            obj[header] = row[idx] !== undefined && row[idx] !== null ? row[idx] : "";
-                        });
+                        for (let i = 0; i < maxCols; i++) {
+                            // undefined나 null도 빈 문자열로 변환하여 위치 보존
+                            obj[colNames[i]] = (row && row[i] !== undefined && row[i] !== null) ? row[i] : "";
+                        }
                         return obj;
                     });
 
@@ -1902,36 +1900,23 @@ class ExcelIO {
                     newSheet[key] = originalSheet[key];
                 });
 
-                // 편집된 데이터로 값 업데이트
+                // 편집된 데이터로 값 업데이트 (Col0, Col1, Col2 키 사용)
                 const range = XLSX.utils.decode_range(originalSheet['!ref'] || 'A1');
-                const firstRow = originalSheet;
-
-                // 첫 행에서 헤더 추출 (SheetJS가 사용한 키와 동일하게)
-                const headerKeys = [];
-                let emptyCount = 0;
-                for (let C = range.s.c; C <= range.e.c; C++) {
-                    const cellAddress = XLSX.utils.encode_cell({ r: range.s.r, c: C });
-                    const cell = firstRow[cellAddress];
-                    let headerValue = cell?.v || cell?.w;
-
-                    // SheetJS가 빈 헤더를 __EMPTY로 처리하므로 동일하게 생성
-                    if (!headerValue || headerValue === '') {
-                        headerValue = emptyCount === 0 ? '__EMPTY' : `__EMPTY_${emptyCount}`;
-                        emptyCount++;
-                    }
-                    headerKeys.push(headerValue);
-                }
 
                 // 데이터 행 업데이트
                 data.forEach((row, rowIndex) => {
-                    headerKeys.forEach((headerKey, colIndex) => {
-                        const cellAddress = XLSX.utils.encode_cell({ r: rowIndex + range.s.r + 1, c: colIndex + range.s.c });
+                    const colKeys = Object.keys(row);
+                    colKeys.forEach(colKey => {
+                        // colKey = "Col0", "Col1", "Col2" ...
+                        const colIndex = parseInt(colKey.replace('Col', ''));
+                        const cellAddress = XLSX.utils.encode_cell({ r: rowIndex + range.s.r, c: colIndex + range.s.c });
                         const cell = newSheet[cellAddress];
 
-                        if (cell && !cell.f && row[headerKey] !== undefined) {
+                        if (cell && !cell.f) {
                             // 수식이 없는 셀만 값 업데이트
-                            cell.v = row[headerKey];
-                            cell.w = row[headerKey] !== null && row[headerKey] !== undefined ? String(row[headerKey]) : "";
+                            const value = row[colKey];
+                            cell.v = value;
+                            cell.w = value !== null && value !== undefined ? String(value) : "";
                         }
                     });
                 });
