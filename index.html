@@ -1005,6 +1005,7 @@ class FormulaEngine {
         this.formulaBar = document.getElementById('formula-input');
         this.cellRef = document.getElementById('cell-reference');
         this.currentCell = null;
+        this.currentCellAddress = null;
         this.setupEvents();
     }
 
@@ -1029,11 +1030,32 @@ class FormulaEngine {
         if (!this.currentCell) return;
 
         const rowIndex = this.currentCell.parentElement.rowIndex;
-        const colIndex = this.currentCell.cellIndex;
+        const colIndex = this.currentCell.cellIndex - 1; // -1 for row header
         const colLetter = this.numberToColumn(colIndex);
 
         this.cellRef.textContent = `${colLetter}${rowIndex}`;
-        this.formulaBar.value = this.currentCell.textContent;
+        this.currentCellAddress = `${colLetter}${rowIndex}`;
+
+        // 원본 수식이 있는지 확인
+        let displayValue = this.currentCell.textContent;
+        if (this.grid.excelIO && this.grid.currentSheetName) {
+            const sheetFormulas = this.grid.excelIO.cellFormulas[this.grid.currentSheetName];
+            if (sheetFormulas) {
+                const cellAddress = this.convertToExcelAddress(rowIndex, colIndex);
+                if (sheetFormulas[cellAddress]) {
+                    displayValue = '=' + sheetFormulas[cellAddress];
+                }
+            }
+        }
+
+        this.formulaBar.value = displayValue;
+    }
+
+    // 행/열 인덱스를 엑셀 주소로 변환 (예: 1, 0 -> A2)
+    convertToExcelAddress(rowIndex, colIndex) {
+        // rowIndex는 1-based (헤더 포함), colIndex는 0-based
+        const col = String.fromCharCode(65 + colIndex);
+        return `${col}${rowIndex}`;
     }
 
     applyFormula() {
@@ -1183,9 +1205,16 @@ class GridManager {
         this.lastSelectedCol = null;
         this.isShiftPressed = false;
 
+        // ExcelIO 참조 (수식 정보 접근용)
+        this.excelIO = null;
+
         // 이벤트 위임 설정 (성능 최적화)
         this.setupEventDelegation();
         this.setupKeyboardNavigation();
+    }
+
+    setExcelIO(excelIO) {
+        this.excelIO = excelIO;
     }
 
     // 이벤트 위임으로 메모리 사용량 대폭 감소
@@ -1694,6 +1723,11 @@ class ExcelIO {
         this.loadingOverlay = document.getElementById('file-loading-overlay');
         this.loadingMessage = document.getElementById('loading-message');
         this.fileInput.addEventListener('change', (e) => this.handleFile(e));
+
+        // 원본 워크북과 시트 보존 (수식/서식 유지를 위해)
+        this.originalWorkbook = null;
+        this.originalSheets = {}; // { sheetName: originalSheetObject }
+        this.cellFormulas = {}; // { sheetName: { cellAddress: formula } }
     }
 
     triggerImport() { this.fileInput.click(); }
@@ -1728,7 +1762,10 @@ class ExcelIO {
                 await new Promise(resolve => setTimeout(resolve, 10));
 
                 const data = new Uint8Array(event.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
+                const workbook = XLSX.read(data, { type: 'array', cellFormula: true, cellStyles: true });
+
+                // 원본 워크북 보존
+                this.originalWorkbook = workbook;
 
                 this.showLoading(`${workbook.SheetNames.length}개 시트 처리 중...`);
 
@@ -1738,10 +1775,26 @@ class ExcelIO {
                     const sheetName = workbook.SheetNames[i];
                     const sheet = workbook.Sheets[sheetName];
 
+                    // 원본 시트 보존
+                    this.originalSheets[sheetName] = sheet;
+
                     // UI 블록 방지
                     if (i % 3 === 0) {
                         this.showLoading(`시트 처리 중... (${i + 1}/${workbook.SheetNames.length})`);
                         await new Promise(resolve => setTimeout(resolve, 0));
+                    }
+
+                    // 수식 정보 추출
+                    this.cellFormulas[sheetName] = {};
+                    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+                    for (let R = range.s.r; R <= range.e.r; R++) {
+                        for (let C = range.s.c; C <= range.e.c; C++) {
+                            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+                            const cell = sheet[cellAddress];
+                            if (cell && cell.f) {
+                                this.cellFormulas[sheetName][cellAddress] = cell.f;
+                            }
+                        }
                     }
 
                     const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: "" });
@@ -1772,16 +1825,73 @@ class ExcelIO {
     }
 
     exportFile() {
-        const wb = XLSX.utils.book_new();
-        const sheets = this.grid.sheets;
+        let wb;
 
-        Object.keys(sheets).forEach(name => {
-            const data = sheets[name];
-            const ws = data && data.length > 0
-                ? XLSX.utils.json_to_sheet(data)
-                : XLSX.utils.aoa_to_sheet([]); // 빈 시트 처리
-            XLSX.utils.book_append_sheet(wb, ws, name);
-        });
+        // 원본 워크북이 있으면 복제하여 사용 (수식/서식 보존)
+        if (this.originalWorkbook) {
+            wb = XLSX.utils.book_new();
+            wb.Props = this.originalWorkbook.Props;
+            wb.SheetNames = this.originalWorkbook.SheetNames.slice();
+
+            const sheets = this.grid.sheets;
+
+            wb.SheetNames.forEach(sheetName => {
+                const data = sheets[sheetName];
+
+                if (!data || data.length === 0) {
+                    // 빈 시트는 원본 그대로 유지
+                    wb.Sheets[sheetName] = this.originalSheets[sheetName] || XLSX.utils.aoa_to_sheet([]);
+                } else {
+                    // 원본 시트 복제
+                    const originalSheet = this.originalSheets[sheetName];
+                    if (originalSheet) {
+                        // 원본 시트를 복사
+                        const newSheet = JSON.parse(JSON.stringify(originalSheet));
+
+                        // 편집된 데이터로 셀 값 업데이트
+                        const keys = Object.keys(data[0] || {});
+                        data.forEach((row, rowIndex) => {
+                            keys.forEach((key, colIndex) => {
+                                const cellAddress = XLSX.utils.encode_cell({ r: rowIndex + 1, c: colIndex }); // +1 for header
+                                const value = row[key];
+
+                                if (newSheet[cellAddress]) {
+                                    // 기존 셀이 있으면 값만 업데이트 (수식이 없는 경우)
+                                    if (!newSheet[cellAddress].f) {
+                                        newSheet[cellAddress].v = value;
+                                        newSheet[cellAddress].w = value !== undefined && value !== null ? String(value) : "";
+                                    }
+                                } else {
+                                    // 새로운 셀 생성
+                                    newSheet[cellAddress] = {
+                                        v: value,
+                                        t: typeof value === 'number' ? 'n' : 's',
+                                        w: value !== undefined && value !== null ? String(value) : ""
+                                    };
+                                }
+                            });
+                        });
+
+                        wb.Sheets[sheetName] = newSheet;
+                    } else {
+                        // 원본이 없으면 새로 생성
+                        wb.Sheets[sheetName] = XLSX.utils.json_to_sheet(data);
+                    }
+                }
+            });
+        } else {
+            // 원본 워크북이 없으면 기존 방식대로
+            wb = XLSX.utils.book_new();
+            const sheets = this.grid.sheets;
+
+            Object.keys(sheets).forEach(name => {
+                const data = sheets[name];
+                const ws = data && data.length > 0
+                    ? XLSX.utils.json_to_sheet(data)
+                    : XLSX.utils.aoa_to_sheet([]); // 빈 시트 처리
+                XLSX.utils.book_append_sheet(wb, ws, name);
+            });
+        }
 
         XLSX.writeFile(wb, "K-IFRS_Data_Validation_Result.xlsx");
     }
@@ -1962,6 +2072,9 @@ const app = (() => {
     const searchManager = new SearchManager(gridManager);
     const validationManager = new ValidationManager(gridManager);
     const formulaEngine = new FormulaEngine(gridManager);
+
+    // GridManager와 ExcelIO 연결 (수식 정보 접근용)
+    gridManager.setExcelIO(excelIO);
 
     const aiPanel = document.getElementById('ai-panel');
     const resizer = document.getElementById('ai-panel-resizer');
