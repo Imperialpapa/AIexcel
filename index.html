@@ -67,26 +67,111 @@
         .loading-content { background: white; padding: 30px 50px; border-radius: 8px; text-align: center; }
         .loading-spinner { border: 4px solid #f3f3f3; border-top: 4px solid #107c41; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Menu Bar */
+        #menu-bar { background: #f8f8f8; border-bottom: 1px solid #d0d0d0; display: flex; gap: 2px; padding: 4px 8px; }
+        .menu-item { padding: 6px 12px; cursor: pointer; border-radius: 3px; font-size: 13px; position: relative; user-select: none; }
+        .menu-item:hover { background: #e0e0e0; }
+        .menu-item.active { background: #d0d0d0; }
+
+        /* Dropdown Menu */
+        .dropdown-menu { display: none; position: absolute; top: 100%; left: 0; background: white; border: 1px solid #ccc; box-shadow: 0 2px 8px rgba(0,0,0,0.15); min-width: 180px; z-index: 1000; }
+        .dropdown-menu.show { display: block; }
+        .menu-option { padding: 8px 16px; cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f0f0f0; }
+        .menu-option:last-child { border-bottom: none; }
+        .menu-option:hover { background: #f5f5f5; }
+        .menu-option.disabled { color: #999; cursor: not-allowed; }
+        .menu-option.disabled:hover { background: white; }
+        .menu-shortcut { color: #999; font-size: 11px; margin-left: 20px; }
+        .menu-separator { height: 1px; background: #e0e0e0; margin: 4px 0; }
+
+        /* Context Menu */
+        #context-menu { display: none; position: fixed; background: white; border: 1px solid #ccc; box-shadow: 0 2px 8px rgba(0,0,0,0.15); min-width: 160px; z-index: 10000; }
+        #context-menu.show { display: block; }
+
+        /* Toolbar */
+        #toolbar { background: #f3f3f3; border-bottom: 1px solid #d0d0d0; padding: 6px 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .toolbar-section { display: flex; gap: 4px; align-items: center; padding: 0 8px; border-right: 1px solid #d0d0d0; }
+        .toolbar-section:last-child { border-right: none; }
+        .toolbar-btn { padding: 5px 10px; cursor: pointer; background: white; border: 1px solid #ccc; border-radius: 3px; font-size: 12px; transition: 0.2s; }
+        .toolbar-btn:hover { background: #e8e8e8; }
+        .toolbar-btn:active { background: #d0d0d0; }
+        .toolbar-btn.disabled { opacity: 0.5; cursor: not-allowed; }
+        .color-picker-btn { width: 30px; height: 26px; border: 1px solid #ccc; border-radius: 3px; cursor: pointer; position: relative; }
+        .color-picker-btn input[type="color"] { position: absolute; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+
+        /* Row/Column Headers */
+        .row-header, .col-header { background: #f0f0f0; font-weight: bold; color: #666; cursor: pointer; user-select: none; }
+        .row-header:hover, .col-header:hover { background: #e0e0e0; }
+        .row-header.selected, .col-header.selected { background: #d0d0d0; }
+        .corner-cell { background: #f0f0f0; cursor: pointer; }
+
+        /* Cell Styling */
+        td.bold { font-weight: bold; }
+        td.italic { font-style: italic; }
+        td.underline { text-decoration: underline; }
+
+        /* Selection */
+        td.selected { background: #cce5ff !important; }
+        tr.selected td { background: #e6f2ff !important; }
     </style>
 </head>
 <body>
 
-<header>
-    <div class="toolbar-group">
+<!-- Menu Bar -->
+<div id="menu-bar">
+    <div class="menu-item" data-menu="file">파일</div>
+    <div class="menu-item" data-menu="edit">편집</div>
+    <div class="menu-item" data-menu="insert">삽입</div>
+    <div class="menu-item" data-menu="format">서식</div>
+    <div class="menu-item" data-menu="data">데이터</div>
+    <div class="menu-item" data-menu="ai">AI</div>
+</div>
+
+<!-- Toolbar -->
+<div id="toolbar">
+    <div class="toolbar-section">
         <input type="file" id="fileInput" hidden />
-        <button class="btn" onclick="app.excelIO.triggerImport()">📂 열기</button>
-        <button class="btn" onclick="app.excelIO.exportFile()">💾 저장</button>
-        <span id="stats"></span>
+        <button class="toolbar-btn" onclick="app.excelIO.triggerImport()">📂 열기</button>
+        <button class="toolbar-btn" onclick="app.excelIO.exportFile()">💾 저장</button>
     </div>
 
-    <div class="toolbar-group">
-        <input type="password" id="api-key" placeholder="OpenAI API Key 입력" />
-        <input type="text" id="ai-prompt" placeholder="예: 가격이 높은 순으로 정렬해줘" />
-        <button class="btn" id="ai-btn" onclick="app.aiEngine.processCommand()">✨ AI 실행</button>
-        <button class="btn btn-toggle" onclick="app.toggleAIPanel()">AI 패널</button>
+    <div class="toolbar-section">
+        <button class="toolbar-btn" id="undo-btn" onclick="app.commandManager.undo()">↶ 실행 취소</button>
+        <button class="toolbar-btn" id="redo-btn" onclick="app.commandManager.redo()">↷ 다시 실행</button>
+    </div>
+
+    <div class="toolbar-section">
+        <button class="toolbar-btn" onclick="app.cellFormatter.toggleBold()"><b>B</b></button>
+        <button class="toolbar-btn" onclick="app.cellFormatter.toggleItalic()"><i>I</i></button>
+        <button class="toolbar-btn" onclick="app.cellFormatter.toggleUnderline()"><u>U</u></button>
+        <div class="color-picker-btn" title="텍스트 색상">
+            <input type="color" id="text-color-picker" onchange="app.cellFormatter.setTextColor(this.value)">
+            A
+        </div>
+        <div class="color-picker-btn" title="배경색">
+            <input type="color" id="bg-color-picker" onchange="app.cellFormatter.setBackgroundColor(this.value)">
+            🎨
+        </div>
+    </div>
+
+    <div class="toolbar-section">
+        <button class="toolbar-btn" onclick="app.sortManager.sortAscending()">↑ 오름차순</button>
+        <button class="toolbar-btn" onclick="app.sortManager.sortDescending()">↓ 내림차순</button>
+    </div>
+
+    <div class="toolbar-section">
+        <input type="password" id="api-key" placeholder="API Key" style="width: 150px;" />
+        <input type="text" id="ai-prompt" placeholder="AI 명령어..." style="width: 250px;" />
+        <button class="toolbar-btn" id="ai-btn" onclick="app.aiEngine.processCommand()">✨ AI 실행</button>
+        <button class="toolbar-btn" onclick="app.toggleAIPanel()">AI 패널</button>
         <span id="loading">처리중... 🤖</span>
     </div>
-</header>
+
+    <div class="toolbar-section">
+        <span id="stats"></span>
+    </div>
+</div>
 
 <div id="main-content">
     <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
@@ -116,9 +201,317 @@
     </div>
 </div>
 
+<!-- Context Menu -->
+<div id="context-menu"></div>
+
 <script>
 /**
- * 1. GridManager: 멀티 시트 관리 및 렌더링 (최적화 버전)
+ * 0. Command Pattern for Undo/Redo
+ */
+class CommandManager {
+    constructor() {
+        this.history = [];
+        this.currentIndex = -1;
+        this.maxHistory = 50;
+    }
+
+    execute(command) {
+        // 현재 위치 이후의 히스토리 제거
+        this.history = this.history.slice(0, this.currentIndex + 1);
+
+        command.execute();
+        this.history.push(command);
+        this.currentIndex++;
+
+        // 히스토리 크기 제한
+        if (this.history.length > this.maxHistory) {
+            this.history.shift();
+            this.currentIndex--;
+        }
+
+        this.updateButtons();
+    }
+
+    undo() {
+        if (this.canUndo()) {
+            const command = this.history[this.currentIndex];
+            command.undo();
+            this.currentIndex--;
+            this.updateButtons();
+        }
+    }
+
+    redo() {
+        if (this.canRedo()) {
+            this.currentIndex++;
+            const command = this.history[this.currentIndex];
+            command.execute();
+            this.updateButtons();
+        }
+    }
+
+    canUndo() {
+        return this.currentIndex >= 0;
+    }
+
+    canRedo() {
+        return this.currentIndex < this.history.length - 1;
+    }
+
+    updateButtons() {
+        const undoBtn = document.getElementById('undo-btn');
+        const redoBtn = document.getElementById('redo-btn');
+        if (undoBtn) undoBtn.classList.toggle('disabled', !this.canUndo());
+        if (redoBtn) redoBtn.classList.toggle('disabled', !this.canRedo());
+    }
+
+    clear() {
+        this.history = [];
+        this.currentIndex = -1;
+        this.updateButtons();
+    }
+}
+
+/**
+ * 1. Context Menu Manager
+ */
+class ContextMenuManager {
+    constructor(gridManager) {
+        this.grid = gridManager;
+        this.menu = document.getElementById('context-menu');
+        this.currentTarget = null;
+        this.setupEvents();
+    }
+
+    setupEvents() {
+        document.addEventListener('contextmenu', (e) => {
+            const target = e.target;
+            if (target.tagName === 'TD' || target.classList.contains('row-header') || target.classList.contains('col-header')) {
+                e.preventDefault();
+                this.show(e, target);
+            } else {
+                this.hide();
+            }
+        });
+
+        document.addEventListener('click', () => this.hide());
+    }
+
+    show(event, target) {
+        this.currentTarget = target;
+        this.menu.innerHTML = '';
+
+        if (target.tagName === 'TD') {
+            this.buildCellMenu();
+        } else if (target.classList.contains('row-header')) {
+            this.buildRowMenu();
+        } else if (target.classList.contains('col-header')) {
+            this.buildColumnMenu();
+        }
+
+        this.menu.style.left = event.pageX + 'px';
+        this.menu.style.top = event.pageY + 'px';
+        this.menu.classList.add('show');
+    }
+
+    hide() {
+        this.menu.classList.remove('show');
+    }
+
+    buildCellMenu() {
+        this.addOption('복사', () => this.grid.copyCells());
+        this.addOption('붙여넣기', () => this.grid.pasteCells());
+        this.addSeparator();
+        this.addOption('행 삽입', () => app.rowColumnManager.insertRow());
+        this.addOption('행 삭제', () => app.rowColumnManager.deleteRow());
+        this.addSeparator();
+        this.addOption('열 삽입', () => app.rowColumnManager.insertColumn());
+        this.addOption('열 삭제', () => app.rowColumnManager.deleteColumn());
+    }
+
+    buildRowMenu() {
+        this.addOption('위에 행 삽입', () => app.rowColumnManager.insertRow());
+        this.addOption('행 삭제', () => app.rowColumnManager.deleteRow());
+    }
+
+    buildColumnMenu() {
+        this.addOption('왼쪽에 열 삽입', () => app.rowColumnManager.insertColumn());
+        this.addOption('열 삭제', () => app.rowColumnManager.deleteColumn());
+    }
+
+    addOption(text, callback) {
+        const option = document.createElement('div');
+        option.className = 'menu-option';
+        option.textContent = text;
+        option.onclick = () => {
+            callback();
+            this.hide();
+        };
+        this.menu.appendChild(option);
+    }
+
+    addSeparator() {
+        const sep = document.createElement('div');
+        sep.className = 'menu-separator';
+        this.menu.appendChild(sep);
+    }
+}
+
+/**
+ * 2. Cell Formatter
+ */
+class CellFormatter {
+    constructor(gridManager) {
+        this.grid = gridManager;
+        this.selectedCells = [];
+    }
+
+    getSelectedCells() {
+        return Array.from(document.querySelectorAll('td.selected'));
+    }
+
+    toggleBold() {
+        const cells = this.getSelectedCells();
+        cells.forEach(cell => cell.classList.toggle('bold'));
+    }
+
+    toggleItalic() {
+        const cells = this.getSelectedCells();
+        cells.forEach(cell => cell.classList.toggle('italic'));
+    }
+
+    toggleUnderline() {
+        const cells = this.getSelectedCells();
+        cells.forEach(cell => cell.classList.toggle('underline'));
+    }
+
+    setTextColor(color) {
+        const cells = this.getSelectedCells();
+        cells.forEach(cell => cell.style.color = color);
+    }
+
+    setBackgroundColor(color) {
+        const cells = this.getSelectedCells();
+        cells.forEach(cell => cell.style.backgroundColor = color);
+    }
+}
+
+/**
+ * 3. Row/Column Manager
+ */
+class RowColumnManager {
+    constructor(gridManager) {
+        this.grid = gridManager;
+    }
+
+    insertRow() {
+        const data = this.grid.getCurrentData();
+        if (!data || data.length === 0) {
+            alert('데이터가 없습니다.');
+            return;
+        }
+
+        const newRow = {};
+        this.grid.currentKeys.forEach(key => newRow[key] = '');
+
+        data.push(newRow);
+        this.grid.renderGrid(data);
+    }
+
+    deleteRow() {
+        const selectedRow = document.querySelector('tr.selected');
+        if (!selectedRow) {
+            alert('삭제할 행을 선택하세요.');
+            return;
+        }
+
+        const rowIndex = selectedRow.rowIndex - 1; // 헤더 제외
+        const data = this.grid.getCurrentData();
+
+        if (confirm(`${rowIndex + 1}번째 행을 삭제하시겠습니까?`)) {
+            data.splice(rowIndex, 1);
+            this.grid.updateCurrentSheetData(data);
+        }
+    }
+
+    insertColumn() {
+        const data = this.grid.getCurrentData();
+        if (!data || data.length === 0) {
+            alert('데이터가 없습니다.');
+            return;
+        }
+
+        const newColName = prompt('새 열 이름을 입력하세요:', '새열' + (this.grid.currentKeys.length + 1));
+        if (!newColName) return;
+
+        data.forEach(row => row[newColName] = '');
+        this.grid.renderGrid(data);
+    }
+
+    deleteColumn() {
+        const selectedHeader = document.querySelector('th.selected');
+        if (!selectedHeader) {
+            alert('삭제할 열을 선택하세요.');
+            return;
+        }
+
+        const colName = selectedHeader.textContent;
+
+        if (confirm(`"${colName}" 열을 삭제하시겠습니까?`)) {
+            const data = this.grid.getCurrentData();
+            data.forEach(row => delete row[colName]);
+            this.grid.renderGrid(data);
+        }
+    }
+}
+
+/**
+ * 4. Sort Manager
+ */
+class SortManager {
+    constructor(gridManager) {
+        this.grid = gridManager;
+    }
+
+    sortAscending() {
+        this.sort(true);
+    }
+
+    sortDescending() {
+        this.sort(false);
+    }
+
+    sort(ascending = true) {
+        const selectedHeader = document.querySelector('th.selected');
+        if (!selectedHeader) {
+            alert('정렬할 열을 선택하세요.');
+            return;
+        }
+
+        const colName = selectedHeader.textContent;
+        const data = this.grid.getCurrentData();
+
+        data.sort((a, b) => {
+            const valA = a[colName];
+            const valB = b[colName];
+
+            // 숫자 비교
+            if (!isNaN(valA) && !isNaN(valB)) {
+                return ascending ? valA - valB : valB - valA;
+            }
+
+            // 문자열 비교
+            const strA = String(valA || '');
+            const strB = String(valB || '');
+            return ascending ? strA.localeCompare(strB) : strB.localeCompare(strA);
+        });
+
+        this.grid.updateCurrentSheetData(data);
+    }
+}
+
+/**
+ * 5. GridManager: 멀티 시트 관리 및 렌더링 (최적화 버전)
  */
 class GridManager {
     constructor(tableId, tabsId) {
@@ -137,6 +530,7 @@ class GridManager {
 
     // 이벤트 위임으로 메모리 사용량 대폭 감소
     setupEventDelegation() {
+        // 셀 편집
         this.tableBody.addEventListener('blur', (e) => {
             if (e.target.tagName === 'TD' && e.target.contentEditable === 'true') {
                 const rowIndex = e.target.parentElement.rowIndex - 1; // 헤더 제외
@@ -148,7 +542,65 @@ class GridManager {
                     this.sheets[this.currentSheetName][rowIndex][key] = isNaN(value) ? value : Number(value);
                 }
             }
-        }, true); // capture phase
+        }, true);
+
+        // 셀 선택
+        this.tableBody.addEventListener('click', (e) => {
+            if (e.target.tagName === 'TD') {
+                // Ctrl 키를 누르지 않으면 기존 선택 해제
+                if (!e.ctrlKey) {
+                    document.querySelectorAll('td.selected, tr.selected, th.selected').forEach(el => {
+                        el.classList.remove('selected');
+                    });
+                }
+                e.target.classList.toggle('selected');
+            }
+        });
+
+        // 헤더 클릭으로 열 선택
+        this.headerRow.addEventListener('click', (e) => {
+            if (e.target.tagName === 'TH') {
+                document.querySelectorAll('th.selected').forEach(th => th.classList.remove('selected'));
+                e.target.classList.add('selected');
+            }
+        });
+    }
+
+    // 복사/붙여넣기 (간단 구현)
+    copyCells() {
+        const cells = document.querySelectorAll('td.selected');
+        if (cells.length === 0) return;
+
+        const values = Array.from(cells).map(cell => cell.textContent);
+        this.clipboard = values;
+        alert(`${cells.length}개 셀이 복사되었습니다.`);
+    }
+
+    pasteCells() {
+        if (!this.clipboard || this.clipboard.length === 0) {
+            alert('복사된 데이터가 없습니다.');
+            return;
+        }
+
+        const cells = document.querySelectorAll('td.selected');
+        if (cells.length === 0) {
+            alert('붙여넣을 셀을 선택하세요.');
+            return;
+        }
+
+        cells.forEach((cell, i) => {
+            if (i < this.clipboard.length) {
+                cell.textContent = this.clipboard[i];
+                // 데이터 업데이트
+                const rowIndex = cell.parentElement.rowIndex - 1;
+                const cellIndex = cell.cellIndex;
+                const key = this.currentKeys[cellIndex];
+                if (key && this.sheets[this.currentSheetName] && this.sheets[this.currentSheetName][rowIndex]) {
+                    const value = this.clipboard[i];
+                    this.sheets[this.currentSheetName][rowIndex][key] = isNaN(value) ? value : Number(value);
+                }
+            }
+        });
     }
 
     // 여러 시트 데이터 로드
@@ -535,6 +987,12 @@ const app = (() => {
     const gridManager = new GridManager('#spreadsheet', '#sheet-tabs');
     const excelIO = new ExcelIO(gridManager);
     const aiEngine = new AIEngine(gridManager);
+    const commandManager = new CommandManager();
+    const contextMenuManager = new ContextMenuManager(gridManager);
+    const cellFormatter = new CellFormatter(gridManager);
+    const rowColumnManager = new RowColumnManager(gridManager);
+    const sortManager = new SortManager(gridManager);
+
     const aiPanel = document.getElementById('ai-panel');
     const resizer = document.getElementById('ai-panel-resizer');
 
@@ -559,10 +1017,9 @@ const app = (() => {
     document.addEventListener('mousemove', (e) => {
         if (!isResizing) return;
 
-        const diff = startX - e.clientX; // 왼쪽으로 드래그하면 양수
+        const diff = startX - e.clientX;
         const newWidth = startWidth + diff;
 
-        // 최소/최대 너비 제한
         if (newWidth >= 200 && newWidth <= 600) {
             aiPanel.style.width = newWidth + 'px';
         }
@@ -575,10 +1032,53 @@ const app = (() => {
         }
     });
 
+    // 키보드 단축키
+    document.addEventListener('keydown', (e) => {
+        // Ctrl+Z: 실행 취소
+        if (e.ctrlKey && e.key === 'z') {
+            e.preventDefault();
+            commandManager.undo();
+        }
+        // Ctrl+Y: 다시 실행
+        if (e.ctrlKey && e.key === 'y') {
+            e.preventDefault();
+            commandManager.redo();
+        }
+        // Ctrl+C: 복사
+        if (e.ctrlKey && e.key === 'c') {
+            const selectedCells = document.querySelectorAll('td.selected');
+            if (selectedCells.length > 0) {
+                e.preventDefault();
+                gridManager.copyCells();
+            }
+        }
+        // Ctrl+V: 붙여넣기
+        if (e.ctrlKey && e.key === 'v') {
+            const selectedCells = document.querySelectorAll('td.selected');
+            if (selectedCells.length > 0) {
+                e.preventDefault();
+                gridManager.pasteCells();
+            }
+        }
+    });
+
     // 초기 데이터 없음 - 사용자가 엑셀 파일을 열어야 함
     gridManager.loadSheets({});
 
-    return { gridManager, excelIO, aiEngine, toggleAIPanel };
+    // 초기 버튼 상태 업데이트
+    commandManager.updateButtons();
+
+    return {
+        gridManager,
+        excelIO,
+        aiEngine,
+        commandManager,
+        contextMenuManager,
+        cellFormatter,
+        rowColumnManager,
+        sortManager,
+        toggleAIPanel
+    };
 })();
 
 </script>
