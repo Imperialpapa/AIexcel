@@ -1798,15 +1798,43 @@ class ExcelIO {
                         }
                     }
 
-                    // SheetJS 기본 동작 사용 (헤더 자동 감지)
-                    // defval: ""로 빈 셀도 포함
-                    // SheetJS는 빈 헤더를 __EMPTY, __EMPTY_1 등으로 자동 처리
-                    const jsonData = XLSX.utils.sheet_to_json(sheet, {
+                    // 모든 데이터를 보존하기 위해 raw 데이터 형식 사용
+                    // header: 1 = 배열 형태로 반환 (모든 행 포함)
+                    const rawData = XLSX.utils.sheet_to_json(sheet, {
+                        header: 1,  // 배열 형태
                         defval: "",
-                        blankrows: false  // 완전히 빈 행은 제외
+                        blankrows: false,
+                        raw: false  // 포맷된 값 사용
                     });
 
-                    allSheetsData[sheetName] = jsonData;
+                    // 빈 시트 처리
+                    if (!rawData || rawData.length === 0) {
+                        allSheetsData[sheetName] = [];
+                        return;
+                    }
+
+                    // 첫 행을 헤더로 사용하되, 빈 헤더 처리
+                    const headers = rawData[0];
+                    let emptyCount = 0;
+                    const processedHeaders = headers.map((h, idx) => {
+                        if (h === null || h === undefined || h === '') {
+                            const key = emptyCount === 0 ? '__EMPTY' : `__EMPTY_${emptyCount}`;
+                            emptyCount++;
+                            return key;
+                        }
+                        return String(h);
+                    });
+
+                    // 모든 행을 객체로 변환 (첫 행도 데이터로 포함)
+                    const objectData = rawData.map(row => {
+                        const obj = {};
+                        processedHeaders.forEach((header, idx) => {
+                            obj[header] = row[idx] !== undefined && row[idx] !== null ? row[idx] : "";
+                        });
+                        return obj;
+                    });
+
+                    allSheetsData[sheetName] = objectData;
                 }
 
                 this.showLoading('화면 렌더링 중...');
