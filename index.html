@@ -1798,40 +1798,15 @@ class ExcelIO {
                         }
                     }
 
-                    // 모든 열을 보존하기 위해 header: 1 옵션 사용
+                    // SheetJS 기본 동작 사용 (헤더 자동 감지)
                     // defval: ""로 빈 셀도 포함
+                    // SheetJS는 빈 헤더를 __EMPTY, __EMPTY_1 등으로 자동 처리
                     const jsonData = XLSX.utils.sheet_to_json(sheet, {
-                        header: 1,  // 배열 형태로 변환 (모든 열 보존)
                         defval: "",
-                        blankrows: true  // 빈 행도 포함
+                        blankrows: false  // 완전히 빈 행은 제외
                     });
 
-                    // 배열 형태를 객체 형태로 변환 (헤더 사용)
-                    if (jsonData.length > 0) {
-                        const headers = jsonData[0]; // 첫 행을 헤더로
-                        const rows = jsonData.slice(1); // 나머지는 데이터
-
-                        // 빈 헤더에 자동으로 열 이름 생성 (Column1, Column2 등)
-                        const processedHeaders = headers.map((h, idx) => {
-                            if (h === null || h === undefined || h === '') {
-                                return `Column${idx + 1}`;
-                            }
-                            return h;
-                        });
-
-                        // 객체 배열로 변환
-                        const objectData = rows.map(row => {
-                            const obj = {};
-                            processedHeaders.forEach((header, idx) => {
-                                obj[header] = row[idx] !== undefined ? row[idx] : "";
-                            });
-                            return obj;
-                        });
-
-                        allSheetsData[sheetName] = objectData;
-                    } else {
-                        allSheetsData[sheetName] = [];
-                    }
+                    allSheetsData[sheetName] = jsonData;
                 }
 
                 this.showLoading('화면 렌더링 중...');
@@ -1893,56 +1868,44 @@ class ExcelIO {
                     '!autofilter': originalSheet['!autofilter']
                 };
 
-                // 원본 시트의 모든 셀 복사 (열 순서 보존)
+                // 원본 시트의 모든 셀 복사
                 Object.keys(originalSheet).forEach(key => {
                     if (key.startsWith('!')) return; // 메타데이터는 이미 복사됨
+                    newSheet[key] = originalSheet[key];
+                });
 
-                    const cell = originalSheet[key];
-                    const decoded = XLSX.utils.decode_cell(key);
-                    const rowIndex = decoded.r;
-                    const colIndex = decoded.c;
+                // 편집된 데이터로 값 업데이트
+                const range = XLSX.utils.decode_range(originalSheet['!ref'] || 'A1');
+                const firstRow = originalSheet;
 
-                    // 헤더 행(rowIndex === 0)은 그대로 유지
-                    if (rowIndex === 0) {
-                        newSheet[key] = cell;
-                        return;
+                // 첫 행에서 헤더 추출 (SheetJS가 사용한 키와 동일하게)
+                const headerKeys = [];
+                let emptyCount = 0;
+                for (let C = range.s.c; C <= range.e.c; C++) {
+                    const cellAddress = XLSX.utils.encode_cell({ r: range.s.r, c: C });
+                    const cell = firstRow[cellAddress];
+                    let headerValue = cell?.v || cell?.w;
+
+                    // SheetJS가 빈 헤더를 __EMPTY로 처리하므로 동일하게 생성
+                    if (!headerValue || headerValue === '') {
+                        headerValue = emptyCount === 0 ? '__EMPTY' : `__EMPTY_${emptyCount}`;
+                        emptyCount++;
                     }
+                    headerKeys.push(headerValue);
+                }
 
-                    // 데이터 행 처리
-                    const dataRowIndex = rowIndex - 1; // -1 for header
-                    const row = data[dataRowIndex];
+                // 데이터 행 업데이트
+                data.forEach((row, rowIndex) => {
+                    headerKeys.forEach((headerKey, colIndex) => {
+                        const cellAddress = XLSX.utils.encode_cell({ r: rowIndex + range.s.r + 1, c: colIndex + range.s.c });
+                        const cell = newSheet[cellAddress];
 
-                    if (!row) {
-                        // 데이터 범위를 벗어난 셀은 원본 그대로
-                        newSheet[key] = cell;
-                        return;
-                    }
-
-                    // 열 헤더에서 키 이름 찾기
-                    const headerCell = originalSheet[XLSX.utils.encode_cell({ r: 0, c: colIndex })];
-                    let headerValue = headerCell?.v || headerCell?.w || `Column${colIndex + 1}`;
-
-                    // 헤더가 비어있었다면 자동 생성된 이름 사용
-                    if (headerValue === null || headerValue === undefined || headerValue === '') {
-                        headerValue = `Column${colIndex + 1}`;
-                    }
-
-                    const value = row[headerValue];
-
-                    if (cell.f) {
-                        // 수식이 있는 셀은 그대로 참조
-                        newSheet[key] = cell;
-                    } else if (value !== undefined) {
-                        // 수식이 없는 셀은 값 업데이트
-                        newSheet[key] = {
-                            ...cell,
-                            v: value,
-                            w: value !== null ? String(value) : ""
-                        };
-                    } else {
-                        // 값이 없으면 원본 그대로
-                        newSheet[key] = cell;
-                    }
+                        if (cell && !cell.f && row[headerKey] !== undefined) {
+                            // 수식이 없는 셀만 값 업데이트
+                            cell.v = row[headerKey];
+                            cell.w = row[headerKey] !== null && row[headerKey] !== undefined ? String(row[headerKey]) : "";
+                        }
+                    });
                 });
 
                 wb.Sheets[sheetName] = newSheet;
