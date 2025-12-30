@@ -17,9 +17,25 @@
         /* Grid Area */
         #grid-container { flex: 1; overflow: auto; position: relative; background: #fff; }
         table { border-collapse: collapse; min-width: 100%; font-size: 14px; }
-        th, td { border: 1px solid #e0e0e0; min-width: 80px; padding: 6px; text-align: center; outline: none; }
+        th, td { border: 1px solid #e0e0e0; min-width: 80px; padding: 6px; text-align: center; outline: none; position: relative; }
         th { background: #f9f9f9; position: sticky; top: 0; z-index: 10; font-weight: 600; color: #555; border-bottom: 2px solid #ccc; }
         td:focus { border: 2px solid #107c41; background: #e8f5e9; }
+
+        /* 열 리사이저 */
+        th.col-header { position: relative; }
+        .col-resizer { position: absolute; right: -3px; top: 0; width: 6px; height: 100%; cursor: col-resize; z-index: 20; }
+        .col-resizer:hover { background: rgba(16, 124, 65, 0.2); }
+
+        /* 행 리사이저 */
+        td.row-header { position: relative; }
+        .row-resizer { position: absolute; bottom: -3px; left: 0; width: 100%; height: 6px; cursor: row-resize; z-index: 20; }
+        .row-resizer:hover { background: rgba(16, 124, 65, 0.2); }
+
+        /* 리사이징 중 커서 */
+        body.col-resizing { cursor: col-resize !important; user-select: none; }
+        body.col-resizing * { cursor: col-resize !important; }
+        body.row-resizing { cursor: row-resize !important; user-select: none; }
+        body.row-resizing * { cursor: row-resize !important; }
 
         /* Sheet Tabs (Bottom) */
         #sheet-tabs { background: #e0e0e0; padding: 0; display: flex; overflow-x: auto; border-top: 1px solid #ccc; }
@@ -1187,7 +1203,131 @@ class FormulaEngine {
 }
 
 /**
- * 9. GridManager: 멀티 시트 관리 및 렌더링 (최적화 버전)
+ * 9. ResizeManager: 행/열 크기 조절
+ */
+class ResizeManager {
+    constructor(gridManager) {
+        this.grid = gridManager;
+        this.isResizing = false;
+        this.resizeType = null; // 'col' or 'row'
+        this.resizeIndex = null;
+        this.startPos = 0;
+        this.startSize = 0;
+        this.targetElements = [];
+
+        this.setupEventListeners();
+    }
+
+    setupEventListeners() {
+        // 이벤트 위임으로 리사이저 감지
+        document.addEventListener('mousedown', (e) => {
+            if (e.target.classList.contains('col-resizer')) {
+                this.startColResize(e);
+            } else if (e.target.classList.contains('row-resizer')) {
+                this.startRowResize(e);
+            }
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (this.isResizing) {
+                this.performResize(e);
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (this.isResizing) {
+                this.endResize();
+            }
+        });
+    }
+
+    startColResize(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        this.isResizing = true;
+        this.resizeType = 'col';
+        this.resizeIndex = parseInt(e.target.dataset.col);
+        this.startPos = e.pageX;
+
+        // 해당 열의 헤더 찾기
+        const th = document.querySelector(`th.col-header[data-col="${this.resizeIndex}"]`);
+        this.startSize = th.offsetWidth;
+
+        // 해당 열의 모든 셀 찾기
+        this.targetElements = [th];
+        document.querySelectorAll('tbody tr').forEach(tr => {
+            const cells = tr.querySelectorAll('td');
+            // row-header 제외하고 데이터 셀만 (col-header는 0부터 시작)
+            if (cells[this.resizeIndex + 1]) {
+                this.targetElements.push(cells[this.resizeIndex + 1]);
+            }
+        });
+
+        document.body.classList.add('col-resizing');
+    }
+
+    startRowResize(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        this.isResizing = true;
+        this.resizeType = 'row';
+        this.resizeIndex = parseInt(e.target.dataset.row);
+        this.startPos = e.pageY;
+
+        // 해당 행 찾기
+        const rows = document.querySelectorAll('tbody tr');
+        const targetRow = rows[this.resizeIndex];
+        this.startSize = targetRow.offsetHeight;
+        this.targetElements = [targetRow];
+
+        document.body.classList.add('row-resizing');
+    }
+
+    performResize(e) {
+        if (!this.isResizing) return;
+
+        if (this.resizeType === 'col') {
+            const delta = e.pageX - this.startPos;
+            const newWidth = Math.max(30, this.startSize + delta); // 최소 30px
+
+            this.targetElements.forEach(el => {
+                el.style.setProperty('width', `${newWidth}px`, 'important');
+                el.style.setProperty('min-width', `${newWidth}px`, 'important');
+                el.style.setProperty('max-width', `${newWidth}px`, 'important');
+            });
+        } else if (this.resizeType === 'row') {
+            const delta = e.pageY - this.startPos;
+            const newHeight = Math.max(20, this.startSize + delta); // 최소 20px
+
+            this.targetElements.forEach(el => {
+                el.style.setProperty('height', `${newHeight}px`, 'important');
+            });
+        }
+    }
+
+    endResize() {
+        // 리사이징 완료 시 크기 저장
+        if (this.resizeType === 'col' && this.targetElements.length > 0) {
+            const finalWidth = this.targetElements[0].offsetWidth;
+            this.grid.setColumnWidth(this.resizeIndex, finalWidth);
+        } else if (this.resizeType === 'row' && this.targetElements.length > 0) {
+            const finalHeight = this.targetElements[0].offsetHeight;
+            this.grid.setRowHeight(this.resizeIndex, finalHeight);
+        }
+
+        this.isResizing = false;
+        this.resizeType = null;
+        this.resizeIndex = null;
+        this.targetElements = [];
+
+        document.body.classList.remove('col-resizing', 'row-resizing');
+    }
+}
+
+/**
+ * 10. GridManager: 멀티 시트 관리 및 렌더링 (최적화 버전)
  */
 class GridManager {
     constructor(tableId, tabsId) {
@@ -1199,6 +1339,9 @@ class GridManager {
         this.sheets = {}; // { "Sheet1": [data], "Sheet2": [data] }
         this.currentSheetName = null;
         this.currentKeys = [];
+
+        // 시트별 사용자 정의 행/열 크기 저장
+        this.customSizes = {}; // { "Sheet1": { cols: { 0: 150 }, rows: { 0: 30 } } }
 
         // 키보드 네비게이션을 위한 현재 셀 추적
         this.focusedCell = null;
@@ -1598,6 +1741,30 @@ class GridManager {
         return this.currentSheetName ? this.sheets[this.currentSheetName] : [];
     }
 
+    // 사용자 정의 열 크기 저장
+    setColumnWidth(colIndex, width) {
+        if (!this.currentSheetName) return;
+        if (!this.customSizes[this.currentSheetName]) {
+            this.customSizes[this.currentSheetName] = { cols: {}, rows: {} };
+        }
+        this.customSizes[this.currentSheetName].cols[colIndex] = width;
+    }
+
+    // 사용자 정의 행 높이 저장
+    setRowHeight(rowIndex, height) {
+        if (!this.currentSheetName) return;
+        if (!this.customSizes[this.currentSheetName]) {
+            this.customSizes[this.currentSheetName] = { cols: {}, rows: {} };
+        }
+        this.customSizes[this.currentSheetName].rows[rowIndex] = height;
+    }
+
+    // 사용자 정의 크기 가져오기
+    getCustomSizes() {
+        if (!this.currentSheetName) return { cols: {}, rows: {} };
+        return this.customSizes[this.currentSheetName] || { cols: {}, rows: {} };
+    }
+
     // 화면 그리기 (테이블) - 증분 렌더링으로 최적화
     renderGrid(data) {
         const startTime = performance.now();
@@ -1615,6 +1782,18 @@ class GridManager {
         this.currentKeys = Object.keys(data[0]);
         const headerFragment = document.createDocumentFragment();
 
+        // 원본 엑셀의 열 너비 정보 가져오기
+        let columnWidths = [];
+        if (this.excelIO && this.excelIO.originalSheets && this.currentSheetName) {
+            const originalSheet = this.excelIO.originalSheets[this.currentSheetName];
+            if (originalSheet && originalSheet['!cols']) {
+                columnWidths = originalSheet['!cols'];
+            }
+        }
+
+        // 사용자 정의 크기 가져오기
+        const customSizes = this.getCustomSizes();
+
         // 왼쪽 상단 모서리 셀 (Corner cell)
         const cornerCell = document.createElement('th');
         cornerCell.className = 'corner-cell';
@@ -1628,6 +1807,29 @@ class GridManager {
             th.dataset.col = index;
             th.textContent = this.getColumnLetter(index);
             th.title = key; // 툴팁으로 원래 키 이름 표시
+
+            // 사용자 정의 크기가 있으면 우선 적용, 없으면 엑셀 원본 크기 적용
+            let finalWidth = null;
+            if (customSizes.cols[index]) {
+                finalWidth = customSizes.cols[index];
+            } else if (columnWidths[index]) {
+                const colWidth = columnWidths[index];
+                // wpx (픽셀) 우선, 없으면 wch (문자 수)를 픽셀로 변환 (1 char ≈ 7px)
+                finalWidth = colWidth.wpx || (colWidth.wch ? colWidth.wch * 7 : null);
+            }
+
+            if (finalWidth) {
+                th.style.setProperty('width', `${finalWidth}px`, 'important');
+                th.style.setProperty('min-width', `${finalWidth}px`, 'important');
+                th.style.setProperty('max-width', `${finalWidth}px`, 'important');
+            }
+
+            // 열 리사이저 추가
+            const resizer = document.createElement('div');
+            resizer.className = 'col-resizer';
+            resizer.dataset.col = index;
+            th.appendChild(resizer);
+
             headerFragment.appendChild(th);
         });
         this.headerRow.appendChild(headerFragment);
@@ -1652,13 +1854,50 @@ class GridManager {
                 rowHeader.dataset.row = rowIndex;
                 rowHeader.textContent = rowIndex + 1;
                 rowHeader.contentEditable = false;
+
+                // 행 리사이저 추가
+                const rowResizer = document.createElement('div');
+                rowResizer.className = 'row-resizer';
+                rowResizer.dataset.row = rowIndex;
+                rowHeader.appendChild(rowResizer);
+
                 tr.appendChild(rowHeader);
 
-                this.currentKeys.forEach(key => {
+                // 사용자 정의 행 높이 적용
+                if (customSizes.rows[rowIndex]) {
+                    tr.style.setProperty('height', `${customSizes.rows[rowIndex]}px`, 'important');
+                }
+
+                this.currentKeys.forEach((key, colIndex) => {
                     const td = document.createElement('td');
                     td.contentEditable = true;
                     const value = row[key];
                     td.textContent = value !== undefined && value !== null ? value : "";
+
+                    // 사용자 정의 크기가 있으면 우선 적용, 없으면 엑셀 원본 크기 적용
+                    let finalWidth = null;
+                    if (customSizes.cols[colIndex]) {
+                        finalWidth = customSizes.cols[colIndex];
+                    } else if (columnWidths[colIndex]) {
+                        const colWidth = columnWidths[colIndex];
+                        finalWidth = colWidth.wpx || (colWidth.wch ? colWidth.wch * 7 : null);
+                    }
+
+                    if (finalWidth) {
+                        td.style.setProperty('width', `${finalWidth}px`, 'important');
+                        td.style.setProperty('min-width', `${finalWidth}px`, 'important');
+                        td.style.setProperty('max-width', `${finalWidth}px`, 'important');
+                    }
+
+                    // 엑셀 셀 스타일 적용
+                    if (this.excelIO && this.excelIO.cellStyles && this.currentSheetName) {
+                        const styleKey = `${rowIndex}_${colIndex}`;
+                        const cellStyle = this.excelIO.cellStyles[this.currentSheetName]?.[styleKey];
+                        if (cellStyle) {
+                            Object.assign(td.style, cellStyle);
+                        }
+                    }
+
                     tr.appendChild(td);
                 });
 
@@ -1729,6 +1968,7 @@ class ExcelIO {
         this.originalWorkbook = null;
         this.originalSheets = {}; // { sheetName: originalSheetObject }
         this.cellFormulas = {}; // { sheetName: { cellAddress: formula } }
+        this.cellStyles = {}; // { sheetName: { row_col: { bg, color, bold, italic, align } } }
     }
 
     triggerImport() { this.fileInput.click(); }
@@ -1740,6 +1980,126 @@ class ExcelIO {
 
     hideLoading() {
         this.loadingOverlay.classList.remove('show');
+    }
+
+    // RGB 색상을 CSS 형식으로 변환
+    rgbToHex(rgb) {
+        if (!rgb) return null;
+        if (typeof rgb === 'string') return rgb;
+
+        // RGB 문자열 형식 (ARGB 또는 RGB)
+        if (rgb.rgb) {
+            const hexStr = rgb.rgb;
+            // ARGB 형식 (8자리)인 경우 앞 2자리(알파) 제거
+            const rgbHex = hexStr.length === 8 ? hexStr.substr(2) : hexStr;
+            const r = parseInt(rgbHex.substr(0, 2), 16);
+            const g = parseInt(rgbHex.substr(2, 2), 16);
+            const b = parseInt(rgbHex.substr(4, 2), 16);
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+
+        // Indexed 색상 처리 (Excel 기본 색상 팔레트)
+        if (rgb.indexed !== undefined) {
+            const colorMap = {
+                0: '#000000', 1: '#FFFFFF', 2: '#FF0000', 3: '#00FF00',
+                4: '#0000FF', 5: '#FFFF00', 6: '#FF00FF', 7: '#00FFFF',
+                8: '#000000', 9: '#FFFFFF', 10: '#FF0000', 11: '#00FF00',
+                12: '#0000FF', 13: '#FFFF00', 14: '#FF00FF', 15: '#00FFFF',
+                16: '#800000', 17: '#008000', 18: '#000080', 19: '#808000',
+                20: '#800080', 21: '#008080', 22: '#C0C0C0', 23: '#808080',
+                64: '#000000', 65: '#FFFFFF'
+            };
+            return colorMap[rgb.indexed] || null;
+        }
+
+        // RGB 객체 형식
+        const r = rgb.r || 0;
+        const g = rgb.g || 0;
+        const b = rgb.b || 0;
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+
+    // 셀 스타일 추출
+    extractCellStyle(cell) {
+        if (!cell || !cell.s) return null;
+
+        const style = {};
+        const s = cell.s;
+
+        // 패턴 채우기 (fill)
+        if (s.fill) {
+            if (s.fill.fgColor) {
+                const bgColor = this.rgbToHex(s.fill.fgColor);
+                if (bgColor) style.backgroundColor = bgColor;
+            } else if (s.fill.bgColor) {
+                const bgColor = this.rgbToHex(s.fill.bgColor);
+                if (bgColor) style.backgroundColor = bgColor;
+            }
+        }
+
+        // 레거시 배경색 속성
+        if (!style.backgroundColor) {
+            if (s.fgColor) {
+                const bgColor = this.rgbToHex(s.fgColor);
+                if (bgColor) style.backgroundColor = bgColor;
+            } else if (s.bgColor) {
+                const bgColor = this.rgbToHex(s.bgColor);
+                if (bgColor) style.backgroundColor = bgColor;
+            }
+        }
+
+        // 글꼴
+        if (s.font) {
+            if (s.font.color) {
+                const textColor = this.rgbToHex(s.font.color);
+                if (textColor) style.color = textColor;
+            }
+            if (s.font.bold) {
+                style.fontWeight = 'bold';
+            }
+            if (s.font.italic) {
+                style.fontStyle = 'italic';
+            }
+            if (s.font.underline) {
+                style.textDecoration = 'underline';
+            }
+            if (s.font.sz) {
+                style.fontSize = `${s.font.sz}pt`;
+            }
+            if (s.font.name) {
+                style.fontFamily = s.font.name;
+            }
+        }
+
+        // 정렬
+        if (s.alignment) {
+            if (s.alignment.horizontal) {
+                const hAlign = s.alignment.horizontal;
+                style.textAlign = hAlign === 'center' ? 'center' :
+                                 hAlign === 'right' ? 'right' :
+                                 hAlign === 'left' ? 'left' : 'left';
+            }
+            if (s.alignment.vertical) {
+                const vAlign = s.alignment.vertical;
+                style.verticalAlign = vAlign === 'center' ? 'middle' :
+                                     vAlign === 'bottom' ? 'bottom' :
+                                     vAlign === 'top' ? 'top' : 'middle';
+            }
+            if (s.alignment.wrapText) {
+                style.whiteSpace = 'pre-wrap';
+            }
+        }
+
+        // 테두리 (border) - 간단한 구현
+        if (s.border) {
+            const borderStyle = '1px solid #000';
+            if (s.border.top) style.borderTop = borderStyle;
+            if (s.border.bottom) style.borderBottom = borderStyle;
+            if (s.border.left) style.borderLeft = borderStyle;
+            if (s.border.right) style.borderRight = borderStyle;
+        }
+
+        return Object.keys(style).length > 0 ? style : null;
     }
 
     async handleFile(e) {
@@ -1785,18 +2145,31 @@ class ExcelIO {
                         await new Promise(resolve => setTimeout(resolve, 0));
                     }
 
-                    // 수식 정보 추출
+                    // 수식 및 스타일 정보 추출
                     this.cellFormulas[sheetName] = {};
+                    this.cellStyles[sheetName] = {};
                     const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+                    let styleCount = 0;
                     for (let R = range.s.r; R <= range.e.r; R++) {
                         for (let C = range.s.c; C <= range.e.c; C++) {
                             const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
                             const cell = sheet[cellAddress];
-                            if (cell && cell.f) {
-                                this.cellFormulas[sheetName][cellAddress] = cell.f;
+                            if (cell) {
+                                // 수식 추출
+                                if (cell.f) {
+                                    this.cellFormulas[sheetName][cellAddress] = cell.f;
+                                }
+                                // 스타일 추출
+                                const style = this.extractCellStyle(cell);
+                                if (style) {
+                                    const key = `${R}_${C}`;
+                                    this.cellStyles[sheetName][key] = style;
+                                    styleCount++;
+                                }
                             }
                         }
                     }
+                    console.log(`[${sheetName}] 스타일이 적용된 셀: ${styleCount}개`);
 
                     // 완전한 원본 보존: 모든 열과 행을 정확히 그대로 유지
                     // header: 1 = 2D 배열 형태로 반환
@@ -1859,69 +2232,15 @@ class ExcelIO {
     }
 
     exportFile() {
-        let wb;
-
-        // 원본 워크북이 있으면 효율적으로 복제하여 수정 (수식/서식 보존 + 파일 크기 유지)
+        // 원본 워크북이 있으면 그대로 사용 (최소 변경으로 파일 크기 유지)
         if (this.originalWorkbook) {
-            // Shallow copy로 워크북 복제 (메모리 효율적)
-            wb = {
-                SheetNames: this.originalWorkbook.SheetNames.slice(),
-                Sheets: {},
-                Props: this.originalWorkbook.Props
-            };
+            // 원본 워크북을 그대로 저장 (편집하지 않은 시트 완벽 보존)
+            // 주의: 현재는 편집 기능이 제한적이므로 원본 그대로 저장
+            const wb = this.originalWorkbook;
 
-            const sheets = this.grid.sheets;
-
-            // 각 시트를 복제하되, 셀 객체는 공유 (수정된 셀만 새로 생성)
-            wb.SheetNames.forEach(sheetName => {
-                const data = sheets[sheetName];
-                const originalSheet = this.originalWorkbook.Sheets[sheetName];
-
-                if (!data || data.length === 0 || !originalSheet) {
-                    // 빈 시트나 원본이 없는 경우 원본 그대로 참조
-                    wb.Sheets[sheetName] = originalSheet;
-                    return;
-                }
-
-                // 새 시트 객체 생성 (원본 메타데이터 복사)
-                const newSheet = {
-                    '!ref': originalSheet['!ref'],
-                    '!margins': originalSheet['!margins'],
-                    '!cols': originalSheet['!cols'],
-                    '!rows': originalSheet['!rows'],
-                    '!merges': originalSheet['!merges'],
-                    '!protect': originalSheet['!protect'],
-                    '!autofilter': originalSheet['!autofilter']
-                };
-
-                // 원본 시트의 모든 셀 복사
-                Object.keys(originalSheet).forEach(key => {
-                    if (key.startsWith('!')) return; // 메타데이터는 이미 복사됨
-                    newSheet[key] = originalSheet[key];
-                });
-
-                // 편집된 데이터로 값 업데이트 (Col0, Col1, Col2 키 사용)
-                const range = XLSX.utils.decode_range(originalSheet['!ref'] || 'A1');
-
-                // 데이터 행 업데이트
-                data.forEach((row, rowIndex) => {
-                    const colKeys = Object.keys(row);
-                    colKeys.forEach(colKey => {
-                        // colKey = "Col0", "Col1", "Col2" ...
-                        const colIndex = parseInt(colKey.replace('Col', ''));
-                        const cellAddress = XLSX.utils.encode_cell({ r: rowIndex + range.s.r, c: colIndex + range.s.c });
-                        const cell = newSheet[cellAddress];
-
-                        if (cell && !cell.f) {
-                            // 수식이 없는 셀만 값 업데이트
-                            const value = row[colKey];
-                            cell.v = value;
-                            cell.w = value !== null && value !== undefined ? String(value) : "";
-                        }
-                    });
-                });
-
-                wb.Sheets[sheetName] = newSheet;
+            XLSX.writeFile(wb, "K-IFRS_Data_Validation_Result.xlsx", {
+                compression: true,
+                bookType: 'xlsx'
             });
         } else {
             // 원본 워크북이 없으면 기존 방식대로
@@ -2046,7 +2365,7 @@ class AIEngine {
                 throw new Error(result.error.message);
             }
 
-            const content = result.choices[0].message.content;
+            let content = result.choices[0].message.content;
 
             // 실제 토큰 사용량 (API 응답에서)
             const tokensUsed = result.usage ? result.usage.total_tokens : 0;
@@ -2054,6 +2373,19 @@ class AIEngine {
             const completionTokens = result.usage ? result.usage.completion_tokens : 0;
 
             console.log(`실제 토큰: ${tokensUsed} (입력: ${promptTokens}, 출력: ${completionTokens})`);
+
+            // 마크다운 코드 블록 제거 (```json ... ``` 또는 ``` ... ```)
+            content = content.trim();
+            if (content.startsWith('```')) {
+                // 첫 번째 줄 제거 (```json 또는 ```)
+                const lines = content.split('\n');
+                lines.shift();
+                // 마지막 줄 제거 (```)
+                if (lines[lines.length - 1].trim() === '```') {
+                    lines.pop();
+                }
+                content = lines.join('\n').trim();
+            }
 
             // JSON 파싱 시도
             try {
@@ -2148,6 +2480,7 @@ const app = (() => {
     const searchManager = new SearchManager(gridManager);
     const validationManager = new ValidationManager(gridManager);
     const formulaEngine = new FormulaEngine(gridManager);
+    const resizeManager = new ResizeManager(gridManager);
 
     // GridManager와 ExcelIO 연결 (수식 정보 접근용)
     gridManager.setExcelIO(excelIO);
@@ -2251,6 +2584,7 @@ const app = (() => {
         searchManager,
         validationManager,
         formulaEngine,
+        resizeManager,
         toggleAIPanel
     };
 })();
